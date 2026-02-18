@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: you7li-postgres
+    environment:
+      POSTGRES_DB: you7li
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - you7li-postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: you7li-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - you7li-redis-data:/data
+
+volumes:
+  you7li-postgres-data:
+  you7li-redis-data:

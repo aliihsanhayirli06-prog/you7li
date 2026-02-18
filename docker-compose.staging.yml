@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      PORT: 8787
+      AUTH_ENABLED: "true"
+      STORAGE_DRIVER: postgres
+      QUEUE_DRIVER: redis
+      DATABASE_URL: postgresql://user:password@postgres:5432/you7li
+      REDIS_URL: redis://redis:6379
+      REDIS_QUEUE_KEY: you7li:publish:jobs
+      REDIS_DLQ_KEY: you7li:publish:dlq
+      JOB_MAX_ATTEMPTS: 3
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8787:8787"
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    environment:
+      AUTH_ENABLED: "true"
+      STORAGE_DRIVER: postgres
+      QUEUE_DRIVER: redis
+      DATABASE_URL: postgresql://user:password@postgres:5432/you7li
+      REDIS_URL: redis://redis:6379
+      REDIS_QUEUE_KEY: you7li:publish:jobs
+      REDIS_DLQ_KEY: you7li:publish:dlq
+      JOB_MAX_ATTEMPTS: 3
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: you7li
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+
+  redis:
+    image: redis:7-alpine

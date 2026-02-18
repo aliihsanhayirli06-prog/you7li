@@ -1,0 +1,232 @@
+openapi: 3.0.3
+info:
+  title: you7li API
+  version: 1.0.0
+  description: YouTube content pipeline API
+servers:
+  - url: http://localhost:8787
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /api/v1/pipeline/run:
+    post:
+      summary: Run full pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic]
+              properties:
+                topic:
+                  type: string
+      responses:
+        "200":
+          description: Pipeline result
+  /api/v1/publish:
+    get:
+      summary: List publishes
+      responses:
+        "200":
+          description: Publish list
+  /api/v1/history:
+    get:
+      summary: List history events
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: publishId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: History list
+  /api/v1/analytics/ingest:
+    post:
+      summary: Ingest analytics metrics
+      responses:
+        "200":
+          description: Analytics ingested
+  /api/v1/youtube/analytics/sync:
+    post:
+      summary: Sync analytics from YouTube stats
+      responses:
+        "200":
+          description: Synced analytics
+  /api/v1/ops/metrics:
+    get:
+      summary: Ops metrics snapshot (admin)
+      responses:
+        "200":
+          description: Metrics payload
+  /api/v1/audit/trail:
+    get:
+      summary: List audit trail events (admin)
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: publishId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit trail list
+  /api/v1/audit/verify:
+    get:
+      summary: Verify audit hash chain integrity (admin)
+      responses:
+        "200":
+          description: Audit chain valid
+        "409":
+          description: Audit chain invalid
+  /api/v1/privacy/policy:
+    get:
+      summary: Get retention and erase policy
+      responses:
+        "200":
+          description: Privacy policy
+  /api/v1/privacy/retention/apply:
+    post:
+      summary: Apply retention policy
+      responses:
+        "200":
+          description: Retention applied
+  /api/v1/privacy/erase-publish:
+    post:
+      summary: Erase publish-linked data
+      responses:
+        "200":
+          description: Data erased
+  /api/v1/ops/autoscale:
+    get:
+      summary: Get worker autoscale plan
+      responses:
+        "200":
+          description: Autoscale plan
+  /api/v1/ops/slo:
+    get:
+      summary: Get SLO report
+      responses:
+        "200":
+          description: SLO report
+  /api/v1/ops/capacity-plan:
+    get:
+      summary: Get capacity plan
+      responses:
+        "200":
+          description: Capacity plan
+  /api/v1/ops/db/profile:
+    get:
+      summary: DB query profile snapshot
+      responses:
+        "200":
+          description: DB profile
+  /api/v1/ops/cache:
+    get:
+      summary: Cache stats
+      responses:
+        "200":
+          description: Cache stats
+  /api/v1/ops/cache/invalidate:
+    post:
+      summary: Invalidate cache by prefix
+      responses:
+        "200":
+          description: Cache invalidated
+  /api/v1/auth/sso/login:
+    post:
+      summary: SSO login with OIDC/SAML test token
+      responses:
+        "200":
+          description: SSO session
+  /api/v1/integrations/webhooks:
+    get:
+      summary: List webhooks
+      responses:
+        "200":
+          description: Webhook list
+    post:
+      summary: Create webhook
+      responses:
+        "201":
+          description: Webhook created
+    delete:
+      summary: Delete webhook by query webhookId
+      responses:
+        "200":
+          description: Webhook removed
+  /api/v1/integrations/webhooks/test:
+    post:
+      summary: Dispatch test webhook event
+      responses:
+        "200":
+          description: Test dispatched
+  /api/v1/integrations/connectors:
+    get:
+      summary: List analytics connectors
+      responses:
+        "200":
+          description: Connector list
+    post:
+      summary: Create analytics connector
+      responses:
+        "201":
+          description: Connector created
+  /api/v1/integrations/connectors/sync:
+    post:
+      summary: Sync analytics to connectors
+      responses:
+        "200":
+          description: Sync result
+  /api/v1/plugins:
+    get:
+      summary: List plugins
+      responses:
+        "200":
+          description: Plugin list
+  /api/v1/plugins/register:
+    post:
+      summary: Register plugin
+      responses:
+        "201":
+          description: Plugin created
+  /api/v1/plugins/execute:
+    post:
+      summary: Execute plugin hook
+      responses:
+        "200":
+          description: Plugin hook result
+  /api/v1/developer/keys:
+    get:
+      summary: List API keys
+      responses:
+        "200":
+          description: API keys
+    post:
+      summary: Create API key
+      responses:
+        "201":
+          description: API key created
+  /api/v1/developer/keys/revoke:
+    post:
+      summary: Revoke API key
+      responses:
+        "200":
+          description: API key revoked
+  /api/v1/security/checklist:
+    get:
+      summary: Security checklist
+      responses:
+        "200":
+          description: Checklist content

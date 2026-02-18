@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>you7li Dashboard</title>
+    <link rel="stylesheet" href="/app/dashboard.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="kicker">you7li control room</p>
+        <h1>Pipeline Dashboard</h1>
+        <p class="sub">Opportunity -> Script -> Video -> Publish akisini canli izle.</p>
+      </header>
+
+      <section class="grid">
+        <article class="card stat">
+          <h2>Health</h2>
+          <div id="health" class="mono">yukleniyor...</div>
+        </article>
+        <article class="card stat">
+          <h2>Son Publishler</h2>
+          <div id="publish-count" class="mono">0</div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>Is Gecmisi</h2>
+          <button id="refresh" type="button">Yenile</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Zaman</th>
+                <th>Event</th>
+                <th>Publish</th>
+                <th>Detay</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Publish Durumlari</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Publish ID</th>
+                <th>Konu</th>
+                <th>Compliance</th>
+                <th>CTR</th>
+                <th>Render</th>
+                <th>Optimize</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="publish-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/app/dashboard.js"></script>
+  </body>
+</html>

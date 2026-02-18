@@ -1,0 +1,27 @@
+{
+  "name": "you7li",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MVP backend skeleton for Opportunity -> Script -> Publish flow",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch apps/api/src/server.js",
+    "start": "node apps/api/src/server.js",
+    "worker": "node services/worker/src/worker.js",
+    "migrate": "node apps/api/src/scripts/migrate.js",
+    "test": "node --test",
+    "lint": "node --check apps/api/src/server.js apps/api/src/routes/api.js apps/api/src/services/*.js apps/api/src/infra/*.js apps/api/src/utils/http.js apps/api/src/scripts/*.js services/worker/src/*.js tests/api/*.test.js",
+    "format": "prettier --write \"**/*.{js,json,md,yml,yaml,css,html}\"",
+    "format:check": "prettier --check \"**/*.{js,json,md,yml,yaml,css,html}\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "pg": "^8.18.0",
+    "redis": "^5.11.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.8.1"
+  }
+}

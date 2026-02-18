@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>you7li Developer Portal</title>
+    <style>
+      :root {
+        --bg: #08111b;
+        --card: #102235;
+        --ink: #e6f0ff;
+        --muted: #9db4ce;
+        --accent: #2bd1a0;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at 10% 10%, #143150, var(--bg));
+        color: var(--ink);
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 18px;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 20px;
+        margin-top: 16px;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+      }
+      code {
+        color: var(--accent);
+      }
+      .muted {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Developer Portal</h1>
+      <p class="muted">API key olustur, revoke et ve entegrasyon endpointlerini test et.</p>
+      <div class="card">
+        <p><code>POST /api/v1/developer/keys</code> yeni key olusturur.</p>
+        <p><code>POST /api/v1/developer/keys/revoke</code> key iptal eder.</p>
+        <p><code>GET /api/v1/developer/keys</code> key listesini getirir.</p>
+        <p><code>GET /api/v1/openapi</code> tum kontrati verir.</p>
+      </div>
+    </div>
+  </body>
+</html>

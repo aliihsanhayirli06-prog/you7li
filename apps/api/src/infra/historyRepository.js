@@ -1,0 +1,52 @@
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+const DATA_DIR = process.env.DATA_DIR || "data";
+const HISTORY_FILE = path.join(DATA_DIR, "history.jsonl");
+
+async function ensureHistoryFile() {
+  await mkdir(DATA_DIR, { recursive: true });
+  try {
+    await readFile(HISTORY_FILE, "utf8");
+  } catch {
+    await writeFile(HISTORY_FILE, "", "utf8");
+  }
+}
+
+export async function appendHistoryEvent(event) {
+  await ensureHistoryFile();
+
+  const payload = {
+    eventId: `evt_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+    createdAt: new Date().toISOString(),
+    ...event
+  };
+
+  await appendFile(HISTORY_FILE, `${JSON.stringify(payload)}\n`, "utf8");
+  return payload;
+}
+
+export async function listHistoryEvents({ limit = 100, publishId = null, tenantId = null } = {}) {
+  await ensureHistoryFile();
+  const raw = await readFile(HISTORY_FILE, "utf8");
+
+  const events = raw
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  const filtered = events.filter((event) => {
+    if (publishId && String(event.publishId || "") !== String(publishId)) return false;
+    if (tenantId && String(event.tenantId || "t_default") !== String(tenantId)) return false;
+    return true;
+  });
+
+  return filtered.slice(-limit).reverse();
+}

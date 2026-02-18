@@ -2,21 +2,27 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPool, shouldUsePostgres } from "./db.js";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const REVIEW_QUEUE_FILE = path.join(DATA_DIR, "review-queue.jsonl");
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getReviewQueueFile() {
+  return path.join(getDataDir(), "review-queue.jsonl");
+}
 
 async function ensureFile() {
-  await mkdir(DATA_DIR, { recursive: true });
+  const file = getReviewQueueFile();
+  await mkdir(path.dirname(file), { recursive: true });
   try {
-    await readFile(REVIEW_QUEUE_FILE, "utf8");
+    await readFile(file, "utf8");
   } catch {
-    await appendFile(REVIEW_QUEUE_FILE, "", "utf8");
+    await appendFile(file, "", "utf8");
   }
 }
 
 async function readItems() {
   await ensureFile();
-  const raw = await readFile(REVIEW_QUEUE_FILE, "utf8");
+  const raw = await readFile(getReviewQueueFile(), "utf8");
   return raw
     .split("\n")
     .filter(Boolean)
@@ -33,7 +39,7 @@ async function readItems() {
 async function rewriteItems(items) {
   const body = items.map((item) => JSON.stringify(item)).join("\n");
   await ensureFile();
-  await writeFile(REVIEW_QUEUE_FILE, body ? `${body}\n` : "", "utf8");
+  await writeFile(getReviewQueueFile(), body ? `${body}\n` : "", "utf8");
 }
 
 function mapRow(row) {
@@ -57,7 +63,7 @@ function mapRow(row) {
 export async function enqueueReviewItem(item) {
   if (!shouldUsePostgres()) {
     await ensureFile();
-    await appendFile(REVIEW_QUEUE_FILE, `${JSON.stringify(item)}\n`, "utf8");
+    await appendFile(getReviewQueueFile(), `${JSON.stringify(item)}\n`, "utf8");
     return item;
   }
 

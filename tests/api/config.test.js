@@ -73,3 +73,58 @@ test("validateConfig passes with minimal valid configuration", () => {
     }
   );
 });
+
+test("validateConfig fails when backpressure soft limit is greater than hard limit", () => {
+  withEnv(
+    {
+      AUTH_ENABLED: "false",
+      YOUTUBE_PUBLISH_MODE: "mock",
+      STORAGE_DRIVER: "file",
+      QUEUE_DRIVER: "file",
+      QUEUE_BACKPRESSURE_SOFT_LIMIT: "100",
+      QUEUE_BACKPRESSURE_HARD_LIMIT: "10"
+    },
+    () => {
+      assert.throws(() => validateConfig("test"), /CONFIG_VALIDATION_FAILED/);
+    }
+  );
+});
+
+test("validateConfig fails on invalid video render preset", () => {
+  withEnv(
+    {
+      AUTH_ENABLED: "false",
+      YOUTUBE_PUBLISH_MODE: "mock",
+      VIDEO_RENDER_PRESET: "ultra"
+    },
+    () => {
+      assert.throws(() => validateConfig("test"), /CONFIG_VALIDATION_FAILED/);
+    }
+  );
+});
+
+test("validateConfig fails on invalid video render template", () => {
+  withEnv(
+    {
+      AUTH_ENABLED: "false",
+      YOUTUBE_PUBLISH_MODE: "mock",
+      VIDEO_RENDER_TEMPLATE: "cinematic"
+    },
+    () => {
+      assert.throws(() => validateConfig("test"), /CONFIG_VALIDATION_FAILED/);
+    }
+  );
+});
+
+test("validateConfig fails on invalid video render format", () => {
+  withEnv(
+    {
+      AUTH_ENABLED: "false",
+      YOUTUBE_PUBLISH_MODE: "mock",
+      VIDEO_RENDER_FORMAT: "instagram-square"
+    },
+    () => {
+      assert.throws(() => validateConfig("test"), /CONFIG_VALIDATION_FAILED/);
+    }
+  );
+});

@@ -3,8 +3,13 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPool, shouldUsePostgres } from "./db.js";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const AUDIT_FILE = path.join(DATA_DIR, "audit-trail.jsonl");
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getAuditFile() {
+  return path.join(getDataDir(), "audit-trail.jsonl");
+}
 
 function stable(value) {
   if (value == null || typeof value !== "object") return value;
@@ -22,17 +27,18 @@ function hashRecord(payload) {
 }
 
 async function ensureFile() {
-  await mkdir(DATA_DIR, { recursive: true });
+  const file = getAuditFile();
+  await mkdir(path.dirname(file), { recursive: true });
   try {
-    await readFile(AUDIT_FILE, "utf8");
+    await readFile(file, "utf8");
   } catch {
-    await writeFile(AUDIT_FILE, "", "utf8");
+    await writeFile(file, "", "utf8");
   }
 }
 
 async function readFileEvents() {
   await ensureFile();
-  const raw = await readFile(AUDIT_FILE, "utf8");
+  const raw = await readFile(getAuditFile(), "utf8");
   return raw
     .split("\n")
     .filter(Boolean)
@@ -48,7 +54,7 @@ async function readFileEvents() {
 
 async function readFileEventsStrict() {
   await ensureFile();
-  const raw = await readFile(AUDIT_FILE, "utf8");
+  const raw = await readFile(getAuditFile(), "utf8");
   const lines = raw.split("\n").filter(Boolean);
   const events = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -98,7 +104,7 @@ export async function appendAuditEvent(event) {
     const chainHash = hashRecord({ ...payload, prevHash });
     const saved = { ...payload, prevHash, chainHash };
     await ensureFile();
-    await appendFile(AUDIT_FILE, `${JSON.stringify(saved)}\n`, "utf8");
+    await appendFile(getAuditFile(), `${JSON.stringify(saved)}\n`, "utf8");
     return saved;
   }
 

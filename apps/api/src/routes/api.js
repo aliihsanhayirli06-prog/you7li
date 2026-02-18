@@ -7,14 +7,22 @@ import { createDraftPublish, getPublish, listPublishes } from "../services/publi
 import { runPipeline } from "../services/pipelineService.js";
 import { shouldUsePostgres } from "../infra/db.js";
 import { shouldUseRedis } from "../infra/redisClient.js";
-import { enqueue, getDlqSize, getQueueSize, listDlq } from "../infra/queueClient.js";
-import { getHistory, logHistory } from "../services/historyService.js";
+import {
+  enqueue,
+  getBackpressurePolicy,
+  getDlqSize,
+  getQueueSize,
+  listDlq
+} from "../infra/queueClient.js";
+import { getHistory, logHistory, subscribeHistoryEvents } from "../services/historyService.js";
 import { evaluateCompliance } from "../services/complianceService.js";
 import {
   getAnalyticsReport,
   ingestAnalytics,
   syncAnalyticsFromYouTube
 } from "../services/analyticsService.js";
+import { predictPerformance } from "../services/performancePredictService.js";
+import { recommendCostAwarePlan } from "../services/costAwareOptimizationService.js";
 import { updatePublishOptimization } from "../infra/publishRepository.js";
 import { authorize } from "../utils/auth.js";
 import { snapshot } from "../infra/metricsStore.js";
@@ -22,6 +30,8 @@ import { fetchYouTubeVideoStats } from "../services/youtubeIntegrationService.js
 import { addChannel, getChannelsByTenant } from "../services/channelService.js";
 import { getMonthlyInvoice, getUsageReport, recordUsage } from "../services/billingService.js";
 import {
+  activateFreemiumForTenant,
+  activateTrialForTenant,
   createTenantRecord,
   ensureTenantContext,
   getTenantList,
@@ -36,10 +46,20 @@ import {
   erasePublishData,
   runBackupDrill
 } from "../services/dataGovernanceService.js";
+import {
+  getMultiRegionDrStatus,
+  runMultiRegionDrill
+} from "../services/disasterRecoveryService.js";
 import { getAutoscalePlan } from "../services/autoscaleService.js";
 import { getSloReport } from "../services/sloService.js";
+import {
+  getDeployStrategyState,
+  switchActiveColor,
+  updateCanaryRollout
+} from "../services/deployStrategyService.js";
 import { cacheStats, invalidateCache } from "../infra/cacheStore.js";
 import { getQueryProfileSnapshot } from "../infra/queryProfiler.js";
+import { getCircuitBreakerPolicy, getCircuitBreakerSnapshot } from "../infra/circuitBreakerStore.js";
 import {
   createWebhook,
   dispatchWebhookEvent,
@@ -50,9 +70,53 @@ import { invokePluginHook, listPlugins, registerPlugin } from "../services/plugi
 import { addConnector, listConnectors, syncConnectors } from "../services/connectorService.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/apiKeyService.js";
 import { ssoLogin } from "../services/ssoService.js";
+import {
+  createReportSchedule,
+  listReportSchedules,
+  toCsv,
+  toPdfBuffer,
+  validateReportDataset,
+  validateReportFormat
+} from "../services/reportService.js";
+import { addAssetVersion, listAssets } from "../services/assetLibraryService.js";
+import { getFeatureStoreSnapshot } from "../services/featureStoreService.js";
+import {
+  assignVariant,
+  createExperiment,
+  getExperimentReport,
+  listExperiments,
+  recordGuardrailMetric
+} from "../services/experimentService.js";
+import {
+  listMarketplacePlugins,
+  listPartnerApplications,
+  submitPartnerApplication
+} from "../services/marketplaceService.js";
+import {
+  createSupportIncident,
+  getSlaTiers,
+  getSoc2ReadinessPack,
+  listSupportIncidents
+} from "../services/enterpriseService.js";
 
 function badRequest(res, message) {
   sendJson(res, 400, { error: message });
+}
+
+function isBackpressureError(error) {
+  return error?.message === "QUEUE_BACKPRESSURE_REJECTED";
+}
+
+function isCircuitOpenError(error) {
+  return String(error?.message || "").startsWith("CIRCUIT_OPEN:");
+}
+
+function slugify(value, fallback = "item") {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
 }
 
 async function enforceCommercialLimits(req, res, action) {
@@ -123,7 +187,13 @@ export async function handleApi(req, res) {
   const parsedUrl = new URL(req.url || "/", "http://localhost");
   const pathname = parsedUrl.pathname;
 
-  if (method === "GET" && pathname === "/app/dashboard") {
+  if (
+    method === "GET" &&
+    (pathname === "/app/dashboard" ||
+      pathname === "/app/ops" ||
+      pathname === "/app/integrations" ||
+      pathname === "/app/security")
+  ) {
     const html = await readFile(path.resolve("apps/web/dashboard.html"), "utf8");
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
@@ -139,6 +209,20 @@ export async function handleApi(req, res) {
 
   if (method === "GET" && pathname === "/app/dashboard.js") {
     const js = await readFile(path.resolve("apps/web/dashboard.js"), "utf8");
+    res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8" });
+    res.end(js);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/status") {
+    const html = await readFile(path.resolve("apps/web/status.html"), "utf8");
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/status.js") {
+    const js = await readFile(path.resolve("apps/web/status.js"), "utf8");
     res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8" });
     res.end(js);
     return;
@@ -182,6 +266,15 @@ export async function handleApi(req, res) {
     return sendJson(res, 200, { items });
   }
 
+  if (method === "GET" && pathname === "/api/v1/auth/me") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    return sendJson(res, 200, {
+      role: req.userRole || "admin",
+      tenantId: req.tenantId || "t_default",
+      authSource: req.authSource || "local"
+    });
+  }
+
   if (method === "GET" && pathname === "/api/v1/channels") {
     if (!authorize(req, res, ["admin", "editor"])) return;
     if (!(await ensureTenantOrReject(req, res))) return;
@@ -219,6 +312,42 @@ export async function handleApi(req, res) {
     return sendJson(res, 200, { items });
   }
 
+  if (method === "GET" && pathname === "/api/v1/history/stream") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+
+    const publishId = parsedUrl.searchParams.get("publishId");
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive"
+    });
+    res.write("event: ready\ndata: {}\n\n");
+
+    const unsubscribe = subscribeHistoryEvents((event) => {
+      if (!event) return;
+      const eventTenant = String(event.tenantId || "t_default");
+      if (eventTenant !== String(req.tenantId || "t_default")) return;
+      if (publishId && String(event.publishId || "") !== String(publishId)) return;
+      res.write(`event: history\ndata: ${JSON.stringify(event)}\n\n`);
+    });
+
+    const heartbeat = setInterval(() => {
+      res.write("event: ping\ndata: {}\n\n");
+    }, 15000);
+
+    const closeStream = () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      if (!res.writableEnded) res.end();
+    };
+
+    req.on("close", closeStream);
+    res.on("close", closeStream);
+    return;
+  }
+
   if (method === "GET" && pathname === "/api/v1/analytics/report") {
     if (!authorize(req, res, ["admin", "editor"])) return;
     if (!(await ensureTenantOrReject(req, res))) return;
@@ -234,6 +363,184 @@ export async function handleApi(req, res) {
       if (error.message === "PUBLISH_NOT_FOUND")
         return sendJson(res, 404, { error: "publish not found" });
       if (error.message === "PUBLISH_ID_REQUIRED") return badRequest(res, "publishId required");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "GET" && pathname === "/api/v1/analytics/feature-store") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const snapshot = await getFeatureStoreSnapshot(req.tenantId);
+    return sendJson(res, 200, snapshot);
+  }
+
+  if (method === "GET" && pathname === "/api/v1/experiments") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const items = await listExperiments(req.tenantId);
+    return sendJson(res, 200, { items });
+  }
+
+  if (method === "POST" && pathname === "/api/v1/experiments") {
+    if (!authorize(req, res, ["admin"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    try {
+      const body = await readJsonBody(req);
+      const created = await createExperiment({
+        tenantId: req.tenantId,
+        name: body.name,
+        targetMetric: body.targetMetric || "ctr",
+        variants: Array.isArray(body.variants) ? body.variants : [],
+        guardrails: body.guardrails || {}
+      });
+      return sendJson(res, 201, created);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "EXPERIMENT_NAME_REQUIRED") return badRequest(res, "name required");
+      if (error.message === "AT_LEAST_TWO_VARIANTS_REQUIRED")
+        return badRequest(res, "at least two variants required");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/experiments/assign") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    try {
+      const body = await readJsonBody(req);
+      const assignment = await assignVariant({
+        tenantId: req.tenantId,
+        experimentId: body.experimentId,
+        publishId: body.publishId || null,
+        subjectId: body.subjectId || null
+      });
+      return sendJson(res, 200, assignment);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "SUBJECT_REQUIRED") return badRequest(res, "publishId or subjectId required");
+      if (error.message === "EXPERIMENT_NOT_FOUND")
+        return sendJson(res, 404, { error: "experiment not found" });
+      if (error.message === "EXPERIMENT_NOT_ACTIVE")
+        return sendJson(res, 409, { error: "experiment not active" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/experiments/metrics") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    try {
+      const body = await readJsonBody(req);
+      const event = await recordGuardrailMetric({
+        tenantId: req.tenantId,
+        experimentId: body.experimentId,
+        variantKey: body.variantKey,
+        publishId: body.publishId || null,
+        metricsCtr: body.metricsCtr,
+        metricsRetention3s: body.metricsRetention3s,
+        metricsCompletionRate: body.metricsCompletionRate,
+        errorRate: body.errorRate
+      });
+      return sendJson(res, 201, event);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "EXPERIMENT_NOT_FOUND")
+        return sendJson(res, 404, { error: "experiment not found" });
+      if (error.message === "VARIANT_NOT_FOUND") return sendJson(res, 404, { error: "variant not found" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "GET" && pathname === "/api/v1/experiments/report") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const experimentId = parsedUrl.searchParams.get("experimentId");
+    if (!experimentId) return badRequest(res, "experimentId required");
+    try {
+      const report = await getExperimentReport({
+        tenantId: req.tenantId,
+        experimentId
+      });
+      return sendJson(res, 200, report);
+    } catch (error) {
+      if (error.message === "EXPERIMENT_NOT_FOUND")
+        return sendJson(res, 404, { error: "experiment not found" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "GET" && pathname === "/api/v1/marketplace/plugins") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const items = await listMarketplacePlugins();
+    return sendJson(res, 200, { items });
+  }
+
+  if (method === "GET" && pathname === "/api/v1/marketplace/partners/applications") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const items = await listPartnerApplications(req.tenantId);
+    return sendJson(res, 200, { items });
+  }
+
+  if (method === "GET" && pathname === "/api/v1/enterprise/compliance-pack") {
+    if (!authorize(req, res, ["admin"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    return sendJson(res, 200, getSoc2ReadinessPack());
+  }
+
+  if (method === "GET" && pathname === "/api/v1/enterprise/sla-tiers") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    return sendJson(res, 200, getSlaTiers());
+  }
+
+  if (method === "GET" && pathname === "/api/v1/enterprise/support/incidents") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const items = await listSupportIncidents(req.tenantId);
+    return sendJson(res, 200, { items });
+  }
+
+  if (method === "POST" && pathname === "/api/v1/enterprise/support/incidents") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    try {
+      const body = await readJsonBody(req);
+      const created = await createSupportIncident({
+        tenantId: req.tenantId,
+        severity: body.severity || "sev3",
+        title: body.title,
+        description: body.description || "",
+        slaTier: body.slaTier || "standard"
+      });
+      return sendJson(res, 201, created);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TITLE_REQUIRED") return badRequest(res, "title required");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/marketplace/partners/apply") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    try {
+      const body = await readJsonBody(req);
+      const created = await submitPartnerApplication({
+        tenantId: req.tenantId,
+        companyName: body.companyName,
+        contactEmail: body.contactEmail,
+        useCase: body.useCase,
+        targetPluginCode: body.targetPluginCode || null
+      });
+      return sendJson(res, 201, created);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "COMPANY_NAME_REQUIRED") return badRequest(res, "companyName required");
+      if (error.message === "INVALID_EMAIL") return badRequest(res, "invalid email");
+      if (error.message === "USE_CASE_REQUIRED") return badRequest(res, "useCase required");
+      if (error.message === "INVALID_PLUGIN_CODE") return badRequest(res, "invalid targetPluginCode");
       return sendJson(res, 500, { error: "internal error" });
     }
   }
@@ -271,6 +578,139 @@ export async function handleApi(req, res) {
     return sendJson(res, 200, invoice);
   }
 
+  if (method === "GET" && pathname === "/api/v1/reports/export") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    const tenant = await ensureTenantOrReject(req, res);
+    if (!tenant) return;
+
+    const dataset = String(parsedUrl.searchParams.get("dataset") || "history").toLowerCase();
+    const format = String(parsedUrl.searchParams.get("format") || "json").toLowerCase();
+    const limit = Number(parsedUrl.searchParams.get("limit") || "200");
+    const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 2000) : 200;
+
+    if (!validateReportDataset(dataset)) return badRequest(res, "invalid dataset");
+    if (!validateReportFormat(format)) return badRequest(res, "invalid format");
+
+    const channels = await getChannelsByTenant(req.tenantId);
+    const channelIds = new Set(channels.map((item) => item.channelId));
+
+    let items = [];
+    if (dataset === "history") {
+      items = await getHistory({ tenantId: req.tenantId, limit: safeLimit });
+    } else if (dataset === "publish") {
+      items = (await listPublishes()).filter((item) => channelIds.has(item.channelId)).slice(0, safeLimit);
+    } else if (dataset === "usage") {
+      const usage = await getUsageReport({ tenantId: req.tenantId, limit: safeLimit });
+      items = usage.events || [];
+    } else if (dataset === "audit") {
+      items = await getAuditTrail({ tenantId: req.tenantId, limit: safeLimit });
+    }
+
+    if (format === "json") {
+      return sendJson(res, 200, {
+        tenantId: tenant.tenantId,
+        dataset,
+        format,
+        generatedAt: new Date().toISOString(),
+        count: items.length,
+        items
+      });
+    }
+
+    if (format === "csv") {
+      const csv = toCsv(items);
+      res.writeHead(200, {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename=\"${dataset}-report.csv\"`
+      });
+      res.end(csv);
+      return;
+    }
+
+    const pdf = toPdfBuffer({ title: `${dataset} report`, items });
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename=\"${dataset}-report.pdf\"`
+    });
+    res.end(pdf);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/v1/reports/schedules") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const items = await listReportSchedules(req.tenantId);
+    return sendJson(res, 200, { items });
+  }
+
+  if (method === "POST" && pathname === "/api/v1/reports/schedules") {
+    if (!authorize(req, res, ["admin"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    try {
+      const body = await readJsonBody(req);
+      const created = await createReportSchedule({
+        tenantId: req.tenantId,
+        email: body.email,
+        dataset: body.dataset,
+        format: body.format || "csv",
+        cadence: body.cadence || "weekly",
+        timezone: body.timezone || "Europe/Istanbul"
+      });
+      return sendJson(res, 201, {
+        schedule: created,
+        delivery: {
+          mode: "simulated_email",
+          status: "scheduled"
+        }
+      });
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "INVALID_EMAIL") return badRequest(res, "invalid email");
+      if (error.message === "INVALID_DATASET") return badRequest(res, "invalid dataset");
+      if (error.message === "INVALID_FORMAT") return badRequest(res, "invalid format");
+      if (error.message === "INVALID_CADENCE") return badRequest(res, "invalid cadence");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/billing/activation") {
+    if (!authorize(req, res, ["admin"])) return;
+    try {
+      const body = await readJsonBody(req);
+      const mode = String(body.mode || "").trim().toLowerCase();
+      const targetTenantId = String(body.tenantId || req.tenantId || "").trim() || "t_default";
+
+      let updated = null;
+      if (mode === "trial") {
+        updated = await activateTrialForTenant(targetTenantId, {
+          durationDays: body.durationDays,
+          monthlyUnitsOverride: body.monthlyUnitsOverride,
+          ratePerMinuteOverride: body.ratePerMinuteOverride
+        });
+      } else if (mode === "freemium") {
+        updated = await activateFreemiumForTenant(targetTenantId, {
+          monthlyUnitsOverride: body.monthlyUnitsOverride,
+          ratePerMinuteOverride: body.ratePerMinuteOverride
+        });
+      } else {
+        return badRequest(res, "mode must be trial or freemium");
+      }
+
+      if (!updated) return sendJson(res, 404, { error: "tenant not found" });
+      return sendJson(res, 200, {
+        tenant: updated,
+        activation: {
+          mode,
+          activatedAt: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TENANT_ID_REQUIRED") return badRequest(res, "tenantId required");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
   if (method === "GET" && pathname === "/api/v1/tenants") {
     if (!authorize(req, res, ["admin"])) return;
     const items = await getTenantList();
@@ -284,11 +724,152 @@ export async function handleApi(req, res) {
     return sendJson(res, 200, tenant);
   }
 
+  if (method === "GET" && pathname === "/api/v1/onboarding/status") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    const tenant = await ensureTenantOrReject(req, res);
+    if (!tenant) return;
+
+    const [channels, publishes, webhooks, connectors, plugins] = await Promise.all([
+      getChannelsByTenant(req.tenantId),
+      listPublishes(),
+      listWebhooks(req.tenantId),
+      listConnectors(req.tenantId),
+      listPlugins(req.tenantId)
+    ]);
+
+    const channelIds = new Set(channels.map((item) => item.channelId));
+    const tenantPublishes = publishes.filter((item) => channelIds.has(item.channelId));
+
+    const completedMap = {
+      tenant_profile: Boolean(tenant.name) && Boolean(tenant.settings?.ownerEmail),
+      channel_connected: channels.length > 0,
+      first_publish_created: tenantPublishes.length > 0,
+      first_publish_completed: tenantPublishes.some((item) => item.status === "published"),
+      integrations_connected: webhooks.length + connectors.length + plugins.length > 0
+    };
+
+    const steps = [
+      {
+        key: "tenant_profile",
+        label: "Tenant profile",
+        done: completedMap.tenant_profile,
+        hint: "Tenant adini ve owner email bilgisini tamamla."
+      },
+      {
+        key: "channel_connected",
+        label: "Channel baglantisi",
+        done: completedMap.channel_connected,
+        hint: "Ilk YouTube kanalini bagla."
+      },
+      {
+        key: "first_publish_created",
+        label: "Ilk publish olustur",
+        done: completedMap.first_publish_created,
+        hint: "Pipeline veya publish/create ile ilk kaydi olustur."
+      },
+      {
+        key: "first_publish_completed",
+        label: "Ilk publish tamamlandi",
+        done: completedMap.first_publish_completed,
+        hint: "Render + publish islemi tamamlanmis en az bir kayit olustur."
+      },
+      {
+        key: "integrations_connected",
+        label: "Integrations bagli",
+        done: completedMap.integrations_connected,
+        hint: "Webhook, connector veya plugin baglantisi ekle."
+      }
+    ];
+
+    const completedSteps = steps.filter((item) => item.done).map((item) => item.key);
+    const nextStep = steps.find((item) => !item.done)?.key || null;
+    const isCompleted = steps.every((item) => item.done);
+
+    return sendJson(res, 200, {
+      tenantId: req.tenantId,
+      onboardingStatus: isCompleted ? "completed" : "in_progress",
+      emptyState: {
+        hasPublish: tenantPublishes.length > 0,
+        hasChannel: channels.length > 0,
+        showGuidedSetup: !isCompleted || tenantPublishes.length === 0
+      },
+      summary: {
+        channels: channels.length,
+        publishes: tenantPublishes.length,
+        published: tenantPublishes.filter((item) => item.status === "published").length,
+        integrations: {
+          webhooks: webhooks.length,
+          connectors: connectors.length,
+          plugins: plugins.length
+        }
+      },
+      steps,
+      completedSteps,
+      nextStep
+    });
+  }
+
   if (method === "GET" && pathname === "/api/v1/ops/metrics") {
     if (!authorize(req, res, ["admin"])) return;
     const queueSize = await getQueueSize();
     const dlqSize = await getDlqSize();
     return sendJson(res, 200, snapshot({ queueSize, dlqSize }));
+  }
+
+  if (method === "GET" && pathname === "/api/v1/ops/status") {
+    if (!authorize(req, res, ["admin"])) return;
+    const queueSize = await getQueueSize();
+    const dlqSize = await getDlqSize();
+    const metrics = snapshot({ queueSize, dlqSize });
+    const slo = await getSloReport();
+    const deployStrategy = await getDeployStrategyState();
+
+    return sendJson(res, 200, {
+      status: slo.slo.status === "healthy" ? "operational" : "degraded",
+      service: "you7li-api",
+      deployMarker: process.env.DEPLOY_MARKER || "dev-local",
+      deployedAt: process.env.DEPLOYED_AT || null,
+      deployStrategy,
+      queueSize,
+      dlqSize,
+      errorRate: slo.slo.errorRate,
+      httpP95Ms: slo.slo.httpP95Ms,
+      counters: metrics.counters,
+      generatedAt: new Date().toISOString()
+    });
+  }
+
+  if (method === "GET" && pathname === "/api/v1/ops/deploy/strategy") {
+    if (!authorize(req, res, ["admin"])) return;
+    const state = await getDeployStrategyState();
+    return sendJson(res, 200, state);
+  }
+
+  if (method === "POST" && pathname === "/api/v1/ops/deploy/canary") {
+    if (!authorize(req, res, ["admin"])) return;
+    try {
+      const body = await readJsonBody(req);
+      const state = await updateCanaryRollout(body.percent);
+      return sendJson(res, 200, state);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "INVALID_CANARY_PERCENT")
+        return badRequest(res, "percent must be between 0 and 100");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/ops/deploy/switch") {
+    if (!authorize(req, res, ["admin"])) return;
+    try {
+      const body = await readJsonBody(req);
+      const targetColor = body?.targetColor || null;
+      const state = await switchActiveColor(targetColor);
+      return sendJson(res, 200, state);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      return sendJson(res, 500, { error: "internal error" });
+    }
   }
 
   if (method === "GET" && pathname === "/api/v1/ops/autoscale") {
@@ -341,6 +922,69 @@ export async function handleApi(req, res) {
     const limit = Number(parsedUrl.searchParams.get("limit") || "20");
     const items = await listDlq(Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 500) : 20);
     return sendJson(res, 200, { items });
+  }
+
+  if (method === "GET" && pathname === "/api/v1/ops/reliability/policy") {
+    if (!authorize(req, res, ["admin"])) return;
+    const queueSize = await getQueueSize();
+    const dlqSize = await getDlqSize();
+    return sendJson(res, 200, {
+      backpressure: getBackpressurePolicy(),
+      circuitBreaker: {
+        ...getCircuitBreakerPolicy(),
+        circuits: getCircuitBreakerSnapshot()
+      },
+      queueSize,
+      dlqSize,
+      generatedAt: new Date().toISOString()
+    });
+  }
+
+  if (method === "GET" && pathname === "/api/v1/ops/runbook") {
+    if (!authorize(req, res, ["admin"])) return;
+    const markdown = await readFile(path.resolve("docs/ops/incident-runbook.md"), "utf8");
+    return sendJson(res, 200, {
+      title: "Incident Runbook",
+      markdown
+    });
+  }
+
+  if (method === "POST" && pathname === "/api/v1/ops/postmortem/export") {
+    if (!authorize(req, res, ["admin"])) return;
+    try {
+      const body = await readJsonBody(req);
+      const incidentId = String(body.incidentId || `inc_${Date.now()}`);
+      const summary = String(body.summary || "Summary pending");
+      const impact = String(body.impact || "Impact pending");
+      const timeline = Array.isArray(body.timeline) ? body.timeline : [];
+      const actions = Array.isArray(body.actions) ? body.actions : [];
+
+      const markdown = [
+        `# Postmortem - ${incidentId}`,
+        "",
+        `GeneratedAt: ${new Date().toISOString()}`,
+        "",
+        "## Summary",
+        summary,
+        "",
+        "## Impact",
+        impact,
+        "",
+        "## Timeline",
+        ...timeline.map((item) => `- ${String(item)}`),
+        "",
+        "## Action Items",
+        ...actions.map((item) => `- ${String(item)}`)
+      ].join("\n");
+
+      return sendJson(res, 200, {
+        incidentId,
+        markdown
+      });
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      return sendJson(res, 500, { error: "internal error" });
+    }
   }
 
   if (method === "GET" && pathname === "/api/v1/audit/trail") {
@@ -426,6 +1070,20 @@ export async function handleApi(req, res) {
     return sendJson(res, 200, report);
   }
 
+  if (method === "GET" && pathname === "/api/v1/ops/dr/multi-region/status") {
+    if (!authorize(req, res, ["admin"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const status = await getMultiRegionDrStatus();
+    return sendJson(res, 200, status);
+  }
+
+  if (method === "POST" && pathname === "/api/v1/ops/dr/multi-region/run") {
+    if (!authorize(req, res, ["admin"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const report = await runMultiRegionDrill({ tenantId: req.tenantId });
+    return sendJson(res, 200, report);
+  }
+
   if (method === "GET" && pathname === "/api/v1/review/queue") {
     if (!authorize(req, res, ["admin", "editor"])) return;
     if (!(await ensureTenantOrReject(req, res))) return;
@@ -460,6 +1118,19 @@ export async function handleApi(req, res) {
     return sendJson(res, 200, { items });
   }
 
+  if (method === "GET" && pathname === "/api/v1/assets/library") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    const type = parsedUrl.searchParams.get("type");
+    const assetKey = parsedUrl.searchParams.get("assetKey");
+    const items = await listAssets({
+      tenantId: req.tenantId,
+      type: type || null,
+      assetKey: assetKey || null
+    });
+    return sendJson(res, 200, { items });
+  }
+
   if (method === "GET" && pathname === "/api/v1/developer/keys") {
     if (!authorize(req, res, ["admin", "editor"])) return;
     if (!(await ensureTenantOrReject(req, res))) return;
@@ -487,6 +1158,9 @@ export async function handleApi(req, res) {
       const stats = await fetchYouTubeVideoStats(videoId);
       return sendJson(res, 200, stats);
     } catch (error) {
+      if (isCircuitOpenError(error)) {
+        return sendJson(res, 503, { error: "upstream temporarily unavailable" });
+      }
       if (error.message === "YOUTUBE_ACCESS_TOKEN_REQUIRED") {
         return sendJson(res, 400, { error: "youtube access token required" });
       }
@@ -634,6 +1308,9 @@ export async function handleApi(req, res) {
       });
       return sendJson(res, 200, result);
     } catch (error) {
+      if (isCircuitOpenError(error)) {
+        return sendJson(res, 503, { error: "upstream temporarily unavailable" });
+      }
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "PUBLISH_ID_REQUIRED") return badRequest(res, "publishId required");
       if (error.message === "PUBLISH_NOT_FOUND")
@@ -677,6 +1354,29 @@ export async function handleApi(req, res) {
     } catch (error) {
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "PLUGIN_HOOK_REQUIRED") return badRequest(res, "hook required");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/assets/library") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    if (!(await ensureTenantOrReject(req, res))) return;
+    try {
+      const body = await readJsonBody(req);
+      const created = await addAssetVersion({
+        tenantId: req.tenantId,
+        assetKey: body.assetKey,
+        name: body.name,
+        type: body.type || "template",
+        sourceUrl: body.sourceUrl || "",
+        metadata: body.metadata || {}
+      });
+      return sendJson(res, 201, created);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "ASSET_KEY_AND_NAME_REQUIRED")
+        return badRequest(res, "assetKey and name required");
+      if (error.message === "INVALID_ASSET_TYPE") return badRequest(res, "invalid asset type");
       return sendJson(res, 500, { error: "internal error" });
     }
   }
@@ -731,6 +1431,9 @@ export async function handleApi(req, res) {
       });
       return sendJson(res, 200, result);
     } catch (error) {
+      if (isBackpressureError(error)) {
+        return sendJson(res, 503, { error: "queue overloaded, try again later" });
+      }
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "REVIEW_ID_AND_DECISION_REQUIRED") {
         return badRequest(res, "reviewId and decision required");
@@ -771,10 +1474,79 @@ export async function handleApi(req, res) {
       });
       return sendJson(res, 200, result);
     } catch (error) {
+      if (isBackpressureError(error)) {
+        return sendJson(res, 503, { error: "queue overloaded, try again later" });
+      }
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "PUBLISH_ID_REQUIRED") return badRequest(res, "publishId required");
       if (error.message === "PUBLISH_NOT_FOUND")
         return sendJson(res, 404, { error: "publish not found" });
+      if (error.message === "TENANT_NOT_FOUND")
+        return sendJson(res, 404, { error: "tenant not found" });
+      if (error.message === "TENANT_INACTIVE")
+        return sendJson(res, 403, { error: "tenant inactive" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/performance/predict") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    try {
+      const quota = await enforceCommercialLimits(req, res, "performance.predict");
+      if (!quota) return;
+      const body = await readJsonBody(req);
+      const prediction = predictPerformance({
+        topic: body.topic,
+        script: body.script || "",
+        opportunityScore: Number(body.opportunityScore || 0.5),
+        format: body.format || "shorts"
+      });
+      await recordUsage("performance.predict", {
+        actorRole: req.userRole,
+        tenantId: req.tenantId,
+        metadata: { overage: quota.usage.overage, format: body.format || "shorts" }
+      });
+      return sendJson(res, 200, prediction);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
+      if (error.message === "FORMAT_INVALID") {
+        return badRequest(res, "format must be shorts, reels, tiktok, youtube");
+      }
+      if (error.message === "TENANT_NOT_FOUND")
+        return sendJson(res, 404, { error: "tenant not found" });
+      if (error.message === "TENANT_INACTIVE")
+        return sendJson(res, 403, { error: "tenant inactive" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/optimize/cost-aware") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    try {
+      const quota = await enforceCommercialLimits(req, res, "optimize.cost_aware");
+      if (!quota) return;
+      const body = await readJsonBody(req);
+      const plan = recommendCostAwarePlan({
+        topic: body.topic,
+        script: body.script || "",
+        format: body.format || "shorts",
+        opportunityScore: Number(body.opportunityScore || 0.5),
+        budgetTier: body.budgetTier || "medium",
+        maxRelativeCost: body.maxRelativeCost ?? null
+      });
+      await recordUsage("optimize.cost_aware", {
+        actorRole: req.userRole,
+        tenantId: req.tenantId,
+        metadata: { overage: quota.usage.overage, budgetTier: body.budgetTier || "medium" }
+      });
+      return sendJson(res, 200, plan);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
+      if (error.message === "FORMAT_INVALID") {
+        return badRequest(res, "format must be shorts, reels, tiktok, youtube");
+      }
       if (error.message === "TENANT_NOT_FOUND")
         return sendJson(res, 404, { error: "tenant not found" });
       if (error.message === "TENANT_INACTIVE")
@@ -801,6 +1573,9 @@ export async function handleApi(req, res) {
       });
       return sendJson(res, 200, result);
     } catch (error) {
+      if (isCircuitOpenError(error)) {
+        return sendJson(res, 503, { error: "upstream temporarily unavailable" });
+      }
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "PUBLISH_ID_REQUIRED") return badRequest(res, "publishId required");
       if (error.message === "PUBLISH_NOT_FOUND")
@@ -905,6 +1680,9 @@ export async function handleApi(req, res) {
       });
       return sendJson(res, 201, payload);
     } catch (error) {
+      if (isBackpressureError(error)) {
+        return sendJson(res, 503, { error: "queue overloaded, try again later" });
+      }
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "TOPIC_AND_SCRIPT_REQUIRED") {
         return badRequest(res, "topic and script required");
@@ -961,6 +1739,9 @@ export async function handleApi(req, res) {
 
       return sendJson(res, 202, { queued: true, publishId: body.publishId });
     } catch (error) {
+      if (isBackpressureError(error)) {
+        return sendJson(res, 503, { error: "queue overloaded, try again later" });
+      }
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "TENANT_NOT_FOUND")
         return sendJson(res, 404, { error: "tenant not found" });
@@ -991,6 +1772,72 @@ export async function handleApi(req, res) {
         return sendJson(res, 409, { error: "tenant already exists" });
       }
       if (error.message === "INVALID_PLAN_CODE") return badRequest(res, "invalid planCode");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/onboarding/self-serve") {
+    try {
+      const body = await readJsonBody(req);
+      const tenantName = String(body.tenantName || "").trim();
+      const ownerEmail = String(body.ownerEmail || "").trim();
+      const channelName = String(body.channelName || "").trim();
+      if (!tenantName || !ownerEmail || !channelName) {
+        return badRequest(res, "tenantName, ownerEmail and channelName required");
+      }
+
+      const tenantId =
+        String(body.tenantId || "").trim() || `t_${slugify(tenantName, "tenant")}_${Date.now()}`;
+      const planCode = String(body.planCode || "free").trim() || "free";
+      const locale = String(body.locale || "tr");
+      const timezone = String(body.timezone || "Europe/Istanbul");
+
+      const createdTenant = await createTenantRecord({
+        tenantId,
+        name: tenantName,
+        planCode,
+        status: "active",
+        settings: {
+          locale,
+          timezone,
+          ownerEmail,
+          onboardingStatus: "in_progress",
+          onboardingStep: "channel_connected"
+        }
+      });
+
+      const channelId =
+        String(body.channelId || "").trim() || `ch_${slugify(channelName, "channel")}_${Date.now()}`;
+      const createdChannel = await addChannel({
+        tenantId,
+        channelId,
+        name: channelName,
+        youtubeChannelId: body.youtubeChannelId || null,
+        defaultLanguage: body.defaultLanguage || "tr"
+      });
+
+      return sendJson(res, 201, {
+        tenant: createdTenant,
+        channel: createdChannel,
+        wizard: {
+          completed: ["tenant_created", "channel_created"],
+          next: ["content_profile", "first_pipeline_run"]
+        }
+      });
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TENANT_ID_AND_NAME_REQUIRED") {
+        return badRequest(res, "tenantId and name required");
+      }
+      if (error.message === "TENANT_ALREADY_EXISTS")
+        return sendJson(res, 409, { error: "tenant already exists" });
+      if (error.message === "INVALID_PLAN_CODE") return badRequest(res, "invalid planCode");
+      if (error.message === "CHANNEL_ID_AND_NAME_REQUIRED") {
+        return badRequest(res, "channelId and name required");
+      }
+      if (error.message === "CHANNEL_ALREADY_EXISTS") {
+        return sendJson(res, 409, { error: "channel already exists" });
+      }
       return sendJson(res, 500, { error: "internal error" });
     }
   }
@@ -1029,6 +1876,9 @@ export async function handleApi(req, res) {
       });
       return sendJson(res, 200, result);
     } catch (error) {
+      if (isBackpressureError(error)) {
+        return sendJson(res, 503, { error: "queue overloaded, try again later" });
+      }
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
       if (error.message === "TOPIC_AND_SCRIPT_REQUIRED") {

@@ -79,3 +79,27 @@ test("editor can create publish but cannot run admin optimize endpoint", async (
     process.env.AUTH_ENABLED = "false";
   }
 });
+
+test("auth me returns editor context with editor token", async () => {
+  process.env.AUTH_ENABLED = "true";
+  process.env.ADMIN_API_TOKEN = "admin-token";
+  process.env.EDITOR_API_TOKEN = "editor-token";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-auth-"));
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+
+  const app = await startTestServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.port}/api/v1/auth/me`, {
+      headers: {
+        Authorization: "Bearer editor-token"
+      }
+    });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.role, "editor");
+  } finally {
+    await app.close();
+    process.env.AUTH_ENABLED = "false";
+  }
+});

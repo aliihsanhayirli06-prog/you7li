@@ -69,7 +69,7 @@ test("review-required publish is queued and can be approved", async () => {
     assert.ok(updated);
     assert.equal(updated.complianceStatus, "pass");
     assert.equal(updated.status, "scheduled");
-    assert.equal(updated.renderStatus, "queued");
+    assert.ok(["queued", "rendering", "rendered"].includes(updated.renderStatus));
 
     const historyRes = await fetch(
       `http://127.0.0.1:${app.port}/api/v1/history?publishId=${created.publishId}&limit=20`

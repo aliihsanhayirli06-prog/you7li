@@ -141,3 +141,130 @@ test("free plan quota blocks requests when monthly unit limit is exceeded", asyn
     await app.close();
   }
 });
+
+test("self-serve onboarding creates tenant and initial channel", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-tenant-"));
+
+  const app = await startTestServer();
+  try {
+    const onboardRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/onboarding/self-serve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantName: "Onboard Team",
+        ownerEmail: "owner@example.com",
+        channelName: "Growth Channel",
+        planCode: "free"
+      })
+    });
+    const onboard = await onboardRes.json();
+    assert.equal(onboardRes.status, 201);
+    assert.equal(onboard.tenant.name, "Onboard Team");
+    assert.equal(onboard.channel.name, "Growth Channel");
+    assert.ok(onboard.wizard.completed.includes("tenant_created"));
+
+    const tenantId = onboard.tenant.tenantId;
+    const channelListRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/channels`, {
+      headers: { "x-tenant-id": tenantId }
+    });
+    const channels = await channelListRes.json();
+    assert.equal(channelListRes.status, 200);
+    assert.ok(channels.items.some((item) => item.channelId === onboard.channel.channelId));
+  } finally {
+    await app.close();
+  }
+});
+
+test("billing activation switches tenant between trial and freemium modes", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-tenant-"));
+
+  const app = await startTestServer();
+  try {
+    const tenantId = `t_billing_${Date.now()}`;
+    const tenantRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/tenants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantId,
+        name: "Billing Activation",
+        planCode: "free",
+        settings: { monthlyUnitsOverride: 1 }
+      })
+    });
+    assert.equal(tenantRes.status, 201);
+
+    const activateTrial = await fetch(`http://127.0.0.1:${app.port}/api/v1/billing/activation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantId,
+        mode: "trial",
+        durationDays: 7,
+        monthlyUnitsOverride: 3,
+        ratePerMinuteOverride: 50
+      })
+    });
+    const trialBody = await activateTrial.json();
+    assert.equal(activateTrial.status, 200);
+    assert.equal(trialBody.tenant.settings.billingMode, "trial");
+    assert.equal(trialBody.tenant.settings.trialActive, true);
+
+    const trialFirst = await fetch(`http://127.0.0.1:${app.port}/api/v1/pipeline/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-tenant-id": tenantId
+      },
+      body: JSON.stringify({ topic: "trial first" })
+    });
+    assert.equal(trialFirst.status, 200);
+
+    const trialSecond = await fetch(`http://127.0.0.1:${app.port}/api/v1/pipeline/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-tenant-id": tenantId
+      },
+      body: JSON.stringify({ topic: "trial second" })
+    });
+    assert.equal(trialSecond.status, 200);
+
+    const activateFreemium = await fetch(
+      `http://127.0.0.1:${app.port}/api/v1/billing/activation`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenantId,
+          mode: "freemium",
+          monthlyUnitsOverride: 1
+        })
+      }
+    );
+    const freemiumBody = await activateFreemium.json();
+    assert.equal(activateFreemium.status, 200);
+    assert.equal(freemiumBody.tenant.planCode, "free");
+    assert.equal(freemiumBody.tenant.settings.billingMode, "freemium");
+    assert.equal(freemiumBody.tenant.settings.trialActive, false);
+
+    const freemiumBlocked = await fetch(`http://127.0.0.1:${app.port}/api/v1/pipeline/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-tenant-id": tenantId
+      },
+      body: JSON.stringify({ topic: "freemium blocked" })
+    });
+    const blockedBody = await freemiumBlocked.json();
+    assert.equal(freemiumBlocked.status, 402);
+    assert.equal(blockedBody.error, "quota exceeded");
+  } finally {
+    await app.close();
+  }
+});

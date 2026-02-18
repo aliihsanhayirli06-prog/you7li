@@ -47,9 +47,12 @@ Detayli urun notlari:
 
 - `GET /health`
 - `GET /api/v1/history`
+- `GET /api/v1/history/stream`
+- `GET /api/v1/auth/me`
 - `GET /api/v1/compliance/report`
 - `GET /api/v1/analytics/report`
 - `GET /api/v1/ops/metrics`
+- `GET /api/v1/ops/status`
 - `GET /api/v1/ops/dlq`
 - `GET /api/v1/ops/autoscale`
 - `GET /api/v1/ops/slo`
@@ -72,11 +75,13 @@ Detayli urun notlari:
 - `GET /api/v1/billing/invoice`
 - `GET /api/v1/tenants`
 - `GET /api/v1/tenants/me`
+- `POST /api/v1/onboarding/self-serve`
 - `POST /api/v1/opportunity/score`
 - `POST /api/v1/compliance/check`
 - `POST /api/v1/review/decision`
 - `POST /api/v1/auth/sso/login`
 - `POST /api/v1/analytics/ingest`
+- `POST /api/v1/performance/predict`
 - `POST /api/v1/optimize/run`
 - `POST /api/v1/youtube/analytics/sync`
 - `POST /api/v1/channels`
@@ -84,6 +89,8 @@ Detayli urun notlari:
 - `POST /api/v1/privacy/retention/apply`
 - `POST /api/v1/privacy/erase-publish`
 - `POST /api/v1/ops/dr/drill`
+- `GET /api/v1/ops/runbook`
+- `POST /api/v1/ops/postmortem/export`
 - `POST /api/v1/integrations/webhooks`
 - `POST /api/v1/integrations/webhooks/test`
 - `POST /api/v1/integrations/connectors`
@@ -99,6 +106,7 @@ Detayli urun notlari:
 - `DELETE /api/v1/integrations/webhooks?webhookId=...`
 - `PATCH /api/v1/tenants/me/settings`
 - `GET /app/dashboard`
+- `GET /status`
 - `GET /developer/portal`
 
 ## Veri Kaynaklari
@@ -108,15 +116,20 @@ Detayli urun notlari:
 - `QUEUE_DRIVER=redis` ile job kayitlari Redis listesine yazilir.
 - `auto` modunda baglanti varsa Postgres/Redis kullanilir, hata olursa `DATA_DIR` altindaki file fallback devreye girer.
 - Worker, `render.generate -> publish.execute` zinciri ile video olusturup yayinlar.
+- Render katmani `VIDEO_RENDER_MODE` ile calisir: `mock` (default), `ffmpeg`, `auto` (ffmpeg hata verirse mock fallback).
+- FFmpeg modu icin `FFMPEG_BIN`, `VIDEO_RENDER_DURATION_SEC`, `VIDEO_RENDER_PRESET` (`fast|balanced|quality`), `VIDEO_RENDER_TEMPLATE` (`basic|minimal`) ve `VIDEO_RENDER_FORMAT` (`shorts|reels|tiktok|youtube`) ayarlanabilir.
 - `GET /health` yanitinda `queueSize` ile mevcut kuyruk uzunlugu gorulebilir.
 - `GET /health` yanitinda `dlqSize` ile dead-letter queue uzunlugu gorulebilir.
 - `GET /api/v1/history` ile is gecmisi event loglari listelenir.
+- `GET /api/v1/history/stream` ile dashboard canli event akisina abone olabilir.
 - Publish olusturma adiminda compliance gate calisir; riskli icerik `blocked` statuse cekilir.
 - Analytics ingest ile CTR/retention metrikleri kaydedilir.
 - Dusuk performans metriklerinde sistem `optimize.generate` job'u uretir.
 - Optimize worker hook/title/thumbnail varyasyonlari olusturur ve publish kaydina yazar.
 - Worker hata alan job'lari tekrar dener, max denemede DLQ'ya tasir.
 - Job idempotency store ayni job'un tekrar islenmesini engeller.
+- Queue backpressure politikasi aktif: soft limitte enqueue gecikmeli, hard limitte yeni job `503` ile reddedilir.
+- YouTube/connector entegrasyonlarinda circuit-breaker bulunur; ard arda hata durumunda gecici `503` doner.
 - `GET /api/v1/ops/metrics` endpoint'i worker/http metrik snapshot'i verir (admin).
 - DLQ kayitlari `GET /api/v1/ops/dlq` ile izlenebilir (admin).
 - `GET /api/v1/youtube/stats?videoId=...` YouTube video istatistiklerini canli ceker.

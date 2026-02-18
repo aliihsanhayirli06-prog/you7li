@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getAnalyticsReport } from "./analyticsService.js";
+import { withCircuitBreaker } from "../infra/circuitBreakerStore.js";
 
 function getFile() {
   const dataDir = process.env.DATA_DIR || "data";
@@ -50,22 +51,29 @@ export async function addConnector({ tenantId, type, endpoint }) {
 export async function syncConnectors({ tenantId, publishId }) {
   if (!publishId) throw new Error("PUBLISH_ID_REQUIRED");
   const connectors = await listConnectors(tenantId);
+  const activeConnectors = connectors.filter((item) => item.active);
   const report = await getAnalyticsReport(publishId);
 
   const results = [];
-  for (const connector of connectors.filter((item) => item.active)) {
+  for (const connector of activeConnectors) {
     try {
-      const res = await fetch(connector.endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          connectorType: connector.type,
-          tenantId,
-          publishId,
-          analytics: report
-        })
+      const status = await withCircuitBreaker(`connector:${connector.connectorId}`, async () => {
+        const res = await fetch(connector.endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            connectorType: connector.type,
+            tenantId,
+            publishId,
+            analytics: report
+          })
+        });
+        if (!res.ok) {
+          throw new Error(`CONNECTOR_HTTP_${res.status}`);
+        }
+        return res.status;
       });
-      results.push({ connectorId: connector.connectorId, ok: res.ok, status: res.status });
+      results.push({ connectorId: connector.connectorId, ok: true, status });
     } catch (error) {
       results.push({
         connectorId: connector.connectorId,
@@ -74,6 +82,13 @@ export async function syncConnectors({ tenantId, publishId }) {
         error: error.message
       });
     }
+  }
+
+  const circuitOpenCount = results.filter((item) =>
+    String(item.error || "").startsWith("CIRCUIT_OPEN:")
+  ).length;
+  if (activeConnectors.length > 0 && circuitOpenCount === activeConnectors.length) {
+    throw new Error("CIRCUIT_OPEN:connectors");
   }
 
   return {

@@ -1,15 +1,21 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const HISTORY_FILE = path.join(DATA_DIR, "history.jsonl");
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getHistoryFile() {
+  return path.join(getDataDir(), "history.jsonl");
+}
 
 async function ensureHistoryFile() {
-  await mkdir(DATA_DIR, { recursive: true });
+  const file = getHistoryFile();
+  await mkdir(path.dirname(file), { recursive: true });
   try {
-    await readFile(HISTORY_FILE, "utf8");
+    await readFile(file, "utf8");
   } catch {
-    await writeFile(HISTORY_FILE, "", "utf8");
+    await writeFile(file, "", "utf8");
   }
 }
 
@@ -22,13 +28,13 @@ export async function appendHistoryEvent(event) {
     ...event
   };
 
-  await appendFile(HISTORY_FILE, `${JSON.stringify(payload)}\n`, "utf8");
+  await appendFile(getHistoryFile(), `${JSON.stringify(payload)}\n`, "utf8");
   return payload;
 }
 
 export async function listHistoryEvents({ limit = 100, publishId = null, tenantId = null } = {}) {
   await ensureHistoryFile();
-  const raw = await readFile(HISTORY_FILE, "utf8");
+  const raw = await readFile(getHistoryFile(), "utf8");
 
   const events = raw
     .split("\n")

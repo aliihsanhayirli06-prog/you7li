@@ -3,13 +3,50 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { getRedisClient, shouldUseRedis } from "./redisClient.js";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const QUEUE_FILE = path.join(DATA_DIR, "queue.jsonl");
-const DLQ_FILE = path.join(DATA_DIR, "dlq.jsonl");
 const MAX_ATTEMPTS = Number(process.env.JOB_MAX_ATTEMPTS || 3);
 
 export const REDIS_QUEUE_KEY = process.env.REDIS_QUEUE_KEY || "you7li:publish:jobs";
 export const REDIS_DLQ_KEY = process.env.REDIS_DLQ_KEY || "you7li:publish:dlq";
+
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getQueueFile() {
+  return path.join(getDataDir(), "queue.jsonl");
+}
+
+function getDlqFile() {
+  return path.join(getDataDir(), "dlq.jsonl");
+}
+
+function getBackpressureSoftLimit() {
+  const value = Number(process.env.QUEUE_BACKPRESSURE_SOFT_LIMIT || 500);
+  return Number.isFinite(value) ? Math.max(1, value) : 500;
+}
+
+function getBackpressureHardLimit() {
+  const value = Number(process.env.QUEUE_BACKPRESSURE_HARD_LIMIT || 1000);
+  return Number.isFinite(value) ? Math.max(1, value) : 1000;
+}
+
+function getBackpressureDeferMs() {
+  const value = Number(process.env.QUEUE_BACKPRESSURE_DEFER_MS || 150);
+  return Number.isFinite(value) ? Math.max(0, value) : 150;
+}
+
+export function getBackpressurePolicy() {
+  return {
+    softLimit: getBackpressureSoftLimit(),
+    hardLimit: getBackpressureHardLimit(),
+    deferMs: getBackpressureDeferMs(),
+    maxAttempts: MAX_ATTEMPTS
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function withJobDefaults(job) {
   return {
@@ -21,7 +58,7 @@ function withJobDefaults(job) {
 }
 
 async function ensureFile(filePath) {
-  await mkdir(DATA_DIR, { recursive: true });
+  await mkdir(path.dirname(filePath), { recursive: true });
   try {
     await readFile(filePath, "utf8");
   } catch {
@@ -77,17 +114,30 @@ async function readLastJsonl(filePath, limit = 20) {
 }
 
 async function enqueueFile(payload) {
-  await appendJsonl(QUEUE_FILE, payload);
+  await appendJsonl(getQueueFile(), payload);
   return payload;
 }
 
 async function enqueueDlqFile(payload) {
-  await appendJsonl(DLQ_FILE, payload);
+  await appendJsonl(getDlqFile(), payload);
   return payload;
 }
 
-export async function enqueue(job) {
+export async function enqueue(job, options = {}) {
   const payload = withJobDefaults(job);
+
+  if (!options.ignoreBackpressure) {
+    const queueSize = await getQueueSize();
+    const hard = getBackpressureHardLimit();
+    const soft = Math.min(getBackpressureSoftLimit(), hard);
+
+    if (queueSize >= hard) {
+      throw new Error("QUEUE_BACKPRESSURE_REJECTED");
+    }
+    if (queueSize >= soft) {
+      await sleep(getBackpressureDeferMs());
+    }
+  }
 
   if (!shouldUseRedis()) {
     return enqueueFile(payload);
@@ -104,7 +154,7 @@ export async function enqueue(job) {
 
 export async function dequeue() {
   if (!shouldUseRedis()) {
-    return lpopJsonl(QUEUE_FILE);
+    return lpopJsonl(getQueueFile());
   }
 
   try {
@@ -113,7 +163,7 @@ export async function dequeue() {
     if (!item) return null;
     return JSON.parse(item);
   } catch {
-    return lpopJsonl(QUEUE_FILE);
+    return lpopJsonl(getQueueFile());
   }
 }
 
@@ -145,13 +195,13 @@ export async function requeueWithRetry(job, errorMessage = "unknown") {
     return { action: "dlq", item: dlqItem, attempt };
   }
 
-  const retried = await enqueue({ ...job, attempt });
+  const retried = await enqueue({ ...job, attempt }, { ignoreBackpressure: true });
   return { action: "retried", item: retried, attempt };
 }
 
 export async function getQueueSize() {
   if (!shouldUseRedis()) {
-    return countJsonl(QUEUE_FILE);
+    return countJsonl(getQueueFile());
   }
 
   try {
@@ -159,13 +209,13 @@ export async function getQueueSize() {
     const size = await client.lLen(REDIS_QUEUE_KEY);
     return Number(size);
   } catch {
-    return countJsonl(QUEUE_FILE);
+    return countJsonl(getQueueFile());
   }
 }
 
 export async function getDlqSize() {
   if (!shouldUseRedis()) {
-    return countJsonl(DLQ_FILE);
+    return countJsonl(getDlqFile());
   }
 
   try {
@@ -173,13 +223,13 @@ export async function getDlqSize() {
     const size = await client.lLen(REDIS_DLQ_KEY);
     return Number(size);
   } catch {
-    return countJsonl(DLQ_FILE);
+    return countJsonl(getDlqFile());
   }
 }
 
 export async function listDlq(limit = 20) {
   if (!shouldUseRedis()) {
-    return readLastJsonl(DLQ_FILE, limit);
+    return readLastJsonl(getDlqFile(), limit);
   }
 
   try {
@@ -196,6 +246,6 @@ export async function listDlq(limit = 20) {
       .filter(Boolean)
       .reverse();
   } catch {
-    return readLastJsonl(DLQ_FILE, limit);
+    return readLastJsonl(getDlqFile(), limit);
   }
 }

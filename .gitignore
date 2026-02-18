@@ -39,3 +39,4 @@ tmp/
 # Local runtime data
 data/*.json
 data/*.jsonl
+data/assets/

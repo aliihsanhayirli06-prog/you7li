@@ -54,3 +54,5 @@ jobs:
         run: |
           echo "Configure your staging runner/SSH deployment here."
           echo "Suggested command: docker compose -f docker-compose.staging.yml pull && docker compose -f docker-compose.staging.yml up -d"
+          echo "Canary example: POST /api/v1/ops/deploy/canary {\"percent\":25}"
+          echo "Blue/green switch example: POST /api/v1/ops/deploy/switch {\"targetColor\":\"green\"}"

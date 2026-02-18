@@ -48,3 +48,20 @@ test("idempotency store tracks processed jobs", async () => {
   await markProcessed(key);
   assert.equal(await isProcessed(key), true);
 });
+
+test("enqueue rejects new jobs when queue backpressure hard limit is reached", async () => {
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-backpressure-"));
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.QUEUE_BACKPRESSURE_SOFT_LIMIT = "1";
+  process.env.QUEUE_BACKPRESSURE_HARD_LIMIT = "1";
+  process.env.QUEUE_BACKPRESSURE_DEFER_MS = "0";
+
+  const { enqueue } = await import("../../apps/api/src/infra/queueClient.js");
+
+  await enqueue({ jobType: "render.generate", publishId: "pub_bp_1" });
+  await assert.rejects(
+    async () => enqueue({ jobType: "render.generate", publishId: "pub_bp_2" }),
+    /QUEUE_BACKPRESSURE_REJECTED/
+  );
+});

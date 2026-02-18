@@ -2,21 +2,27 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { getPool, shouldUsePostgres } from "./db.js";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const USAGE_FILE = path.join(DATA_DIR, "usage-events.jsonl");
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getUsageFile() {
+  return path.join(getDataDir(), "usage-events.jsonl");
+}
 
 async function ensureFile() {
-  await mkdir(DATA_DIR, { recursive: true });
+  const file = getUsageFile();
+  await mkdir(path.dirname(file), { recursive: true });
   try {
-    await readFile(USAGE_FILE, "utf8");
+    await readFile(file, "utf8");
   } catch {
-    await appendFile(USAGE_FILE, "", "utf8");
+    await appendFile(file, "", "utf8");
   }
 }
 
 async function readFileEvents() {
   await ensureFile();
-  const raw = await readFile(USAGE_FILE, "utf8");
+  const raw = await readFile(getUsageFile(), "utf8");
 
   return raw
     .split("\n")
@@ -34,7 +40,7 @@ async function readFileEvents() {
 export async function saveUsageEvent(event) {
   if (!shouldUsePostgres()) {
     await ensureFile();
-    await appendFile(USAGE_FILE, `${JSON.stringify(event)}\n`, "utf8");
+    await appendFile(getUsageFile(), `${JSON.stringify(event)}\n`, "utf8");
     return event;
   }
 
@@ -63,7 +69,7 @@ export async function saveUsageEvent(event) {
     return event;
   } catch {
     await ensureFile();
-    await appendFile(USAGE_FILE, `${JSON.stringify(event)}\n`, "utf8");
+    await appendFile(getUsageFile(), `${JSON.stringify(event)}\n`, "utf8");
     return event;
   }
 }

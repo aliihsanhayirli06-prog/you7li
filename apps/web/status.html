@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>you7li Status</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f9fb;
+        --ink: #0e1a28;
+        --muted: #4b5d71;
+        --line: #d3deea;
+        --ok: #1f8f4e;
+        --warn: #c97d11;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #eef4fb, var(--bg));
+        color: var(--ink);
+      }
+      main {
+        width: min(920px, 92vw);
+        margin: 2rem auto 3rem;
+      }
+      h1 {
+        margin: 0;
+      }
+      .sub {
+        color: var(--muted);
+        margin-top: 0.4rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.8rem;
+        margin-top: 1rem;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 0.9rem;
+      }
+      .k {
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      .v {
+        margin-top: 0.35rem;
+        font-weight: 700;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      pre {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 0.8rem;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>you7li status</h1>
+      <p class="sub">Operational health, queue pressure, and deploy marker snapshot.</p>
+
+      <section class="grid">
+        <article class="card">
+          <div class="k">Service Status</div>
+          <div id="status" class="v">loading...</div>
+        </article>
+        <article class="card">
+          <div class="k">Queue / DLQ</div>
+          <div id="queue" class="v">-</div>
+        </article>
+        <article class="card">
+          <div class="k">Error Rate</div>
+          <div id="error-rate" class="v">-</div>
+        </article>
+        <article class="card">
+          <div class="k">HTTP P95</div>
+          <div id="http-p95" class="v">-</div>
+        </article>
+      </section>
+
+      <h2>Deploy Marker</h2>
+      <pre id="deploy">loading...</pre>
+    </main>
+    <script type="module" src="/status.js"></script>
+  </body>
+</html>

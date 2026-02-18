@@ -86,3 +86,82 @@
 - [x] F8 Scale & Performance: autoscaling, cache invalidation stratejisi, DB tuning, kapasite/SLO yonetimi.
 - [x] F9 Ecosystem: webhook/outbound entegrasyonlar, plugin API, connector seti, developer portal.
 - [x] F10 Enterprise: SSO, ileri RBAC/ABAC, DR tatbikati, pen-test ve hardening checklist.
+
+## F11 - UX/Product Maturity
+
+- [x] Dashboard bilgi mimarisini role-based kisilestirme (admin/editor/operator gorunumleri)
+- [x] In-app onboarding, empty-state ve guided setup akislari
+- [x] Gercek zamanli job timeline (SSE/WebSocket) ve canli durum guncellemesi
+- [x] Rapor/export merkezi (CSV/PDF + scheduled email)
+
+## F12 - Media Pipeline v2
+
+- [x] Template tabanli video render (intro/outro, lower-third, brand kit)
+- [x] Asset library ve versiyonlama (gorsel/ses/sablon)
+- [x] FFmpeg render preset yonetimi (kalite/hiz/maliyet profilleri)
+- [x] Multi-format cikti (Shorts, Reels, TikTok oran/preset setleri)
+
+## F13 - SRE & Reliability+
+
+- [x] Canary + blue/green deployment stratejisi
+- [x] Queue backpressure ve circuit-breaker politikasi
+- [x] Multi-region backup/restore otomasyonu ve RPO/RTO olcumleme
+- [x] Incident runbook + status page + postmortem workflow
+
+## F14 - Data & Intelligence
+
+- [x] Feature store benzeri analytics modeli (icerik, kanal, tenant segmentleri)
+- [x] Tahminleyici performans modeli (publish oncesi beklenen CTR/retention)
+- [x] Deney platformu (A/B test framework, guardrail metrikleri)
+- [x] Cost-aware optimization (kalite-maliyet dengeli otomatik karar)
+
+## F15 - Platform & Commercial Expansion
+
+- [x] Self-serve tenant provisioning + trial/freemium activation
+- [x] Marketplace (plugin/distributor) ve partner onboarding akisi
+- [x] Kurumsal uyum paketleri (SOC2 hazirlik kontrolleri, audit export paketleri)
+- [x] SLA tiering ve enterprise support operasyonu
+
+## Onceliklendirilmis Backlog (P0/P1/P2)
+
+- [x] `P0` Gercek zamanli job timeline (SSE/WebSocket) ve canli durum guncellemesi
+- [x] `P0` Queue backpressure ve circuit-breaker politikasi
+- [x] `P0` FFmpeg render preset yonetimi (kalite/hiz/maliyet profilleri)
+- [x] `P0` Incident runbook + status page + postmortem workflow
+- [x] `P1` Dashboard role-based bilgi mimarisi (admin/editor/operator)
+- [x] `P1` Template tabanli video render + brand kit
+- [x] `P1` Multi-format cikti (Shorts/Reels/TikTok)
+- [x] `P1` Tahminleyici performans modeli (publish oncesi)
+- [x] `P1` Self-serve tenant provisioning + trial/freemium
+- [x] `P2` In-app onboarding + guided setup
+- [x] `P2` Rapor/export merkezi (CSV/PDF + scheduled email)
+- [x] `P2` Feature store benzeri analytics modeli
+- [x] `P2` Deney platformu (A/B test + guardrail metrikleri)
+- [x] `P2` Marketplace + partner onboarding
+- [x] `P2` SOC2 hazirlik paketleri + SLA tiering
+
+## Sprint Backlog (Oneri)
+
+### Sprint 1 (P0 cekirdek)
+
+- [x] SSE/WebSocket event stream endpoint ve dashboard aboneligi
+- [x] Worker->event bus publish entegrasyonu (`render.started/completed`, `publish.started/completed`)
+- [x] Queue backpressure kurallari (max queue lag, reject/defer stratejisi)
+- [x] Circuit-breaker (YouTube/OpenAI/connector adapter seviyesinde)
+- [x] Runbook v1 + incident severity matrisi
+
+### Sprint 2 (P0 kapanis + P1 baslangic)
+
+- [x] FFmpeg preset profilleri (`fast`, `balanced`, `quality`) + env/config mapping
+- [x] Template render altyapisi (intro/outro/lower-third)
+- [x] Dashboard role-based navigation/paneller
+- [x] Status page MVP (health, queue, error-rate, deploy marker)
+- [x] Postmortem template + otomatik incident timeline export
+
+### Sprint 3 (P1 genisleme)
+
+- [x] Multi-format render profilleri (9:16, 1:1, 16:9)
+- [x] Publish-oncesi performans tahmin endpoint'i
+- [x] Tenant self-serve onboarding (tenant create + initial channel wizard)
+- [x] Billing trial/freemium activation akisi
+- [x] E2E regresyon seti (dashboard + pipeline + review + render)

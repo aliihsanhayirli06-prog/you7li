@@ -2,8 +2,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPool, shouldUsePostgres } from "./db.js";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const TENANTS_FILE = path.join(DATA_DIR, "tenants.json");
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getTenantsFile() {
+  return path.join(getDataDir(), "tenants.json");
+}
 const DEFAULT_TENANT = {
   tenantId: "t_default",
   name: "Default Tenant",
@@ -17,17 +22,18 @@ const DEFAULT_TENANT = {
 };
 
 async function ensureFile() {
-  await mkdir(DATA_DIR, { recursive: true });
+  const file = getTenantsFile();
+  await mkdir(path.dirname(file), { recursive: true });
   try {
-    await readFile(TENANTS_FILE, "utf8");
+    await readFile(file, "utf8");
   } catch {
-    await writeFile(TENANTS_FILE, JSON.stringify([DEFAULT_TENANT], null, 2), "utf8");
+    await writeFile(file, JSON.stringify([DEFAULT_TENANT], null, 2), "utf8");
   }
 }
 
 async function readFromFile() {
   await ensureFile();
-  const raw = await readFile(TENANTS_FILE, "utf8");
+  const raw = await readFile(getTenantsFile(), "utf8");
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [DEFAULT_TENANT];
@@ -37,7 +43,7 @@ async function readFromFile() {
 }
 
 async function writeToFile(items) {
-  await writeFile(TENANTS_FILE, JSON.stringify(items, null, 2), "utf8");
+  await writeFile(getTenantsFile(), JSON.stringify(items, null, 2), "utf8");
 }
 
 function mapRow(row) {

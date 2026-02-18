@@ -30,6 +30,37 @@ function validateCommon(errors) {
     isNumberLike(process.env.JOB_IDEMPOTENCY_TTL_HOURS || 48),
     "JOB_IDEMPOTENCY_TTL_HOURS must be a valid number"
   );
+  assertEnv(
+    errors,
+    isNumberLike(process.env.QUEUE_BACKPRESSURE_SOFT_LIMIT || 500),
+    "QUEUE_BACKPRESSURE_SOFT_LIMIT must be a valid number"
+  );
+  assertEnv(
+    errors,
+    isNumberLike(process.env.QUEUE_BACKPRESSURE_HARD_LIMIT || 1000),
+    "QUEUE_BACKPRESSURE_HARD_LIMIT must be a valid number"
+  );
+  assertEnv(
+    errors,
+    isNumberLike(process.env.QUEUE_BACKPRESSURE_DEFER_MS || 150),
+    "QUEUE_BACKPRESSURE_DEFER_MS must be a valid number"
+  );
+  assertEnv(
+    errors,
+    isNumberLike(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || 3),
+    "CIRCUIT_BREAKER_FAILURE_THRESHOLD must be a valid number"
+  );
+  assertEnv(
+    errors,
+    isNumberLike(process.env.CIRCUIT_BREAKER_COOLDOWN_MS || 30000),
+    "CIRCUIT_BREAKER_COOLDOWN_MS must be a valid number"
+  );
+
+  const soft = Number(process.env.QUEUE_BACKPRESSURE_SOFT_LIMIT || 500);
+  const hard = Number(process.env.QUEUE_BACKPRESSURE_HARD_LIMIT || 1000);
+  if (Number.isFinite(soft) && Number.isFinite(hard) && soft > hard) {
+    errors.push("QUEUE_BACKPRESSURE_SOFT_LIMIT must be <= QUEUE_BACKPRESSURE_HARD_LIMIT");
+  }
 }
 
 function validateAuth(errors) {
@@ -112,6 +143,34 @@ function validateSso(errors) {
   );
 }
 
+function validateRender(errors) {
+  const mode = String(process.env.VIDEO_RENDER_MODE || "mock").toLowerCase();
+  if (mode !== "mock" && mode !== "ffmpeg" && mode !== "auto") {
+    errors.push("VIDEO_RENDER_MODE must be one of: mock, ffmpeg, auto");
+  }
+
+  const preset = String(process.env.VIDEO_RENDER_PRESET || "balanced").toLowerCase();
+  if (preset !== "fast" && preset !== "balanced" && preset !== "quality") {
+    errors.push("VIDEO_RENDER_PRESET must be one of: fast, balanced, quality");
+  }
+
+  const template = String(process.env.VIDEO_RENDER_TEMPLATE || "basic").toLowerCase();
+  if (template !== "basic" && template !== "minimal") {
+    errors.push("VIDEO_RENDER_TEMPLATE must be one of: basic, minimal");
+  }
+
+  const format = String(process.env.VIDEO_RENDER_FORMAT || "shorts").toLowerCase();
+  if (format !== "shorts" && format !== "reels" && format !== "tiktok" && format !== "youtube") {
+    errors.push("VIDEO_RENDER_FORMAT must be one of: shorts, reels, tiktok, youtube");
+  }
+
+  assertEnv(
+    errors,
+    isNumberLike(process.env.VIDEO_RENDER_DURATION_SEC || 6),
+    "VIDEO_RENDER_DURATION_SEC must be a valid number"
+  );
+}
+
 export function validateConfig(target = "api") {
   const errors = [];
 
@@ -120,6 +179,7 @@ export function validateConfig(target = "api") {
   validateStorage(errors);
   validateYouTube(errors);
   validateSso(errors);
+  validateRender(errors);
 
   if (errors.length > 0) {
     log("error", "config_validation_failed", {

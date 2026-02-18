@@ -83,6 +83,97 @@ test("pipeline endpoint creates publish and list endpoint returns it", async () 
   }
 });
 
+test("auth me endpoint returns role context", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
+
+  const app = await startTestServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.port}/api/v1/auth/me`);
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.role, "admin");
+    assert.equal(json.tenantId, "t_default");
+  } finally {
+    await app.close();
+  }
+});
+
+test("history stream emits realtime events", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
+
+  const app = await startTestServer();
+  const sseReq = http.request({
+    hostname: "127.0.0.1",
+    port: app.port,
+    path: "/api/v1/history/stream",
+    method: "GET",
+    headers: {
+      Accept: "text/event-stream"
+    }
+  });
+
+  let readyResolve;
+  let eventResolve;
+  let eventReject;
+  let readySeen = false;
+  const readyPromise = new Promise((resolve) => {
+    readyResolve = resolve;
+  });
+  const eventPromise = new Promise((resolve, reject) => {
+    eventResolve = resolve;
+    eventReject = reject;
+  });
+
+  const timeout = setTimeout(() => eventReject(new Error("SSE_EVENT_TIMEOUT")), 5000);
+
+  try {
+    sseReq.on("response", (res) => {
+      assert.equal(res.statusCode, 200);
+      res.setEncoding("utf8");
+      let buffer = "";
+
+      res.on("data", (chunk) => {
+        buffer += chunk;
+        if (!readySeen && buffer.includes("event: ready")) {
+          readySeen = true;
+          readyResolve();
+        }
+        if (buffer.includes("event: history")) {
+          clearTimeout(timeout);
+          eventResolve(buffer);
+        }
+      });
+    });
+    sseReq.end();
+
+    await readyPromise;
+
+    const createRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/publish/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "stream test",
+        script: "stream payload"
+      })
+    });
+    assert.equal(createRes.status, 201);
+
+    const streamBody = await eventPromise;
+    assert.match(streamBody, /event: history/);
+    assert.match(streamBody, /publish\.created/);
+  } finally {
+    clearTimeout(timeout);
+    sseReq.destroy();
+    await app.close();
+  }
+});
+
 test("dashboard route serves html", async () => {
   process.env.STORAGE_DRIVER = "file";
   process.env.QUEUE_DRIVER = "file";
@@ -94,6 +185,55 @@ test("dashboard route serves html", async () => {
     const html = await res.text();
     assert.equal(res.status, 200);
     assert.match(html, /Pipeline Dashboard/);
+  } finally {
+    await app.close();
+  }
+});
+
+test("additional dashboard routes serve shared shell html", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
+
+  const app = await startTestServer();
+  try {
+    const routes = ["/app/ops", "/app/integrations", "/app/security"];
+    for (const route of routes) {
+      const res = await fetch(`http://127.0.0.1:${app.port}${route}`);
+      const html = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(html, /Pipeline Dashboard/);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("publish create returns 503 when queue backpressure hard limit is reached", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
+  process.env.QUEUE_BACKPRESSURE_SOFT_LIMIT = "1";
+  process.env.QUEUE_BACKPRESSURE_HARD_LIMIT = "1";
+  process.env.QUEUE_BACKPRESSURE_DEFER_MS = "0";
+
+  const { enqueue } = await import("../../apps/api/src/infra/queueClient.js");
+  await enqueue({ jobType: "render.generate", publishId: "pub_queue_seed" });
+
+  const app = await startTestServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.port}/api/v1/publish/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "queue pressure",
+        script: "render enqueue denemesi"
+      })
+    });
+    const json = await res.json();
+    assert.equal(res.status, 503);
+    assert.equal(json.error, "queue overloaded, try again later");
   } finally {
     await app.close();
   }
@@ -126,10 +266,20 @@ test("youtube analytics sync endpoint ingests derived metrics", async () => {
   process.env.YOUTUBE_PUBLISH_MODE = "mock";
   process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
 
+  const { addChannel } = await import("../../apps/api/src/services/channelService.js");
   const { savePublish } = await import("../../apps/api/src/infra/publishRepository.js");
+  const channelId = `ch_sync_${Date.now()}`;
+  await addChannel({
+    tenantId: "t_default",
+    channelId,
+    name: "Sync Test Channel",
+    youtubeChannelId: null,
+    defaultLanguage: "tr"
+  });
   const publishId = `pub_sync_${Date.now()}`;
   await savePublish({
     publishId,
+    channelId,
     topic: "sync test",
     title: "title",
     description: "desc",
@@ -176,6 +326,34 @@ test("ops metrics endpoint returns counters", async () => {
   }
 });
 
+test("performance predict endpoint returns forecast payload", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
+
+  const app = await startTestServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.port}/api/v1/performance/predict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "Shorts retention optimization",
+        script: "Hook acik ve net. Sonra 3 adim.",
+        opportunityScore: 0.73,
+        format: "reels"
+      })
+    });
+    const json = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(json.input.format, "reels");
+    assert.equal(typeof json.forecast.metricsCtr, "number");
+    assert.equal(typeof json.confidence, "number");
+  } finally {
+    await app.close();
+  }
+});
+
 test("openapi endpoint serves yaml", async () => {
   process.env.STORAGE_DRIVER = "file";
   process.env.QUEUE_DRIVER = "file";
@@ -188,6 +366,64 @@ test("openapi endpoint serves yaml", async () => {
     const text = await res.text();
     assert.equal(res.status, 200);
     assert.match(text, /openapi: 3.0.3/);
+  } finally {
+    await app.close();
+  }
+});
+
+test("status page route serves html", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
+
+  const app = await startTestServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.port}/status`);
+    const html = await res.text();
+    assert.equal(res.status, 200);
+    assert.match(html, /you7li status/i);
+  } finally {
+    await app.close();
+  }
+});
+
+test("ops status/runbook/postmortem endpoints return expected payloads", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DEPLOY_MARKER = "test-build-1";
+  process.env.DEPLOYED_AT = "2026-02-18T00:00:00.000Z";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-routes-"));
+
+  const app = await startTestServer();
+  try {
+    const statusRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/ops/status`);
+    const statusJson = await statusRes.json();
+    assert.equal(statusRes.status, 200);
+    assert.equal(statusJson.deployMarker, "test-build-1");
+    assert.equal(typeof statusJson.queueSize, "number");
+
+    const runbookRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/ops/runbook`);
+    const runbookJson = await runbookRes.json();
+    assert.equal(runbookRes.status, 200);
+    assert.match(runbookJson.markdown, /Incident Runbook/);
+
+    const exportRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/ops/postmortem/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        incidentId: "inc_001",
+        summary: "queue saturation",
+        impact: "publish delays",
+        timeline: ["10:00 detect", "10:10 mitigate"],
+        actions: ["add queue guardrails"]
+      })
+    });
+    const exportJson = await exportRes.json();
+    assert.equal(exportRes.status, 200);
+    assert.match(exportJson.markdown, /Postmortem - inc_001/);
+    assert.match(exportJson.markdown, /queue saturation/);
   } finally {
     await app.close();
   }

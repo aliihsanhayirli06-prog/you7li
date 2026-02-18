@@ -7,64 +7,196 @@
     <link rel="stylesheet" href="/app/dashboard.css" />
   </head>
   <body>
-    <main class="shell">
-      <header class="hero">
-        <p class="kicker">you7li control room</p>
-        <h1>Pipeline Dashboard</h1>
-        <p class="sub">Opportunity -> Script -> Video -> Publish akisini canli izle.</p>
-      </header>
+    <div id="app-shell" class="app-shell sidebar-collapsed" data-mobile-open="false">
+      <button id="mobile-backdrop" class="mobile-backdrop" aria-hidden="true"></button>
 
-      <section class="grid">
-        <article class="card stat">
-          <h2>Health</h2>
-          <div id="health" class="mono">yukleniyor...</div>
-        </article>
-        <article class="card stat">
-          <h2>Son Publishler</h2>
-          <div id="publish-count" class="mono">0</div>
-        </article>
-      </section>
+      <aside
+        id="sidebar"
+        class="sidebar"
+        aria-label="Dashboard navigation"
+        data-pinned="false"
+        data-hovered="false"
+      >
+        <div class="sidebar-head">
+          <div class="brand" aria-label="you7li">
+            <span class="brand-icon">Y7</span>
+            <span class="brand-text">you7li</span>
+          </div>
+          <button id="pin-sidebar" class="icon-btn" type="button" aria-label="Sidebar sabitle">
+            📌
+          </button>
+        </div>
 
-      <section class="card">
-        <div class="section-head">
-          <h2>Is Gecmisi</h2>
-          <button id="refresh" type="button">Yenile</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Zaman</th>
-                <th>Event</th>
-                <th>Publish</th>
-                <th>Detay</th>
-              </tr>
-            </thead>
-            <tbody id="history-body"></tbody>
-          </table>
-        </div>
-      </section>
+        <nav class="menu" aria-label="Main menu">
+          <a href="/app/dashboard" data-route="dashboard" class="menu-item">
+            <span class="menu-icon">🏠</span>
+            <span class="menu-label">Dashboard</span>
+          </a>
+          <a href="/app/ops" data-route="ops" class="menu-item">
+            <span class="menu-icon">⚙️</span>
+            <span class="menu-label">Ops</span>
+          </a>
+          <a href="/app/integrations" data-route="integrations" class="menu-item">
+            <span class="menu-icon">🔌</span>
+            <span class="menu-label">Integrations</span>
+          </a>
+          <a href="/app/security" data-route="security" class="menu-item">
+            <span class="menu-icon">🛡️</span>
+            <span class="menu-label">Security</span>
+          </a>
+        </nav>
+      </aside>
 
-      <section class="card">
-        <h2>Publish Durumlari</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Publish ID</th>
-                <th>Konu</th>
-                <th>Compliance</th>
-                <th>CTR</th>
-                <th>Render</th>
-                <th>Optimize</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="publish-body"></tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+      <div class="workspace">
+        <header class="topbar">
+          <button id="mobile-toggle" class="icon-btn" type="button" aria-label="Menüyü aç">
+            ☰
+          </button>
+          <div>
+            <p class="kicker">you7li control room</p>
+            <h1 id="page-title">Pipeline Dashboard</h1>
+            <p id="role-badge" class="role-badge">role: -</p>
+          </div>
+        </header>
+
+        <main class="content" id="content">
+          <section data-view="dashboard" class="view">
+            <section id="onboarding-panel" class="card onboarding" hidden>
+              <div class="section-head">
+                <h2>Guided Setup</h2>
+                <span id="onboarding-badge" class="role-badge">in_progress</span>
+              </div>
+              <p id="onboarding-summary" class="sub">Kurulum durumu yukleniyor...</p>
+              <ul id="onboarding-steps" class="step-list"></ul>
+              <div class="onboarding-actions">
+                <button id="onboarding-run-pipeline" type="button">Ilk Pipeline'i Baslat</button>
+                <a id="onboarding-open-integrations" class="menu-item cta-link" href="/app/integrations"
+                  >Integrations'a Git</a
+                >
+              </div>
+            </section>
+
+            <section class="grid">
+              <article class="card stat">
+                <h2>Health</h2>
+                <div id="health" class="mono">yukleniyor...</div>
+              </article>
+              <article class="card stat">
+                <h2>Son Publishler</h2>
+                <div id="publish-count" class="mono">0</div>
+              </article>
+              <article class="card stat">
+                <h2>Canli Akis</h2>
+                <div id="live-status" class="mono">baglanti bekleniyor...</div>
+              </article>
+            </section>
+
+            <section class="card">
+              <div class="section-head">
+                <h2>Is Gecmisi</h2>
+                <button id="refresh" type="button">Yenile</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Zaman</th>
+                      <th>Event</th>
+                      <th>Publish</th>
+                      <th>Detay</th>
+                    </tr>
+                  </thead>
+                  <tbody id="history-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card">
+              <h2>Publish Durumlari</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Publish ID</th>
+                      <th>Konu</th>
+                      <th>Compliance</th>
+                      <th>CTR</th>
+                      <th>Render</th>
+                      <th>Optimize</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="publish-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section data-view="ops" class="view" hidden>
+            <section class="grid">
+              <article class="card stat">
+                <h2>HTTP P95</h2>
+                <div id="ops-http-p95" class="mono">-</div>
+              </article>
+              <article class="card stat">
+                <h2>Queue Size</h2>
+                <div id="ops-queue-size" class="mono">-</div>
+              </article>
+              <article class="card stat">
+                <h2>Autoscale</h2>
+                <div id="ops-autoscale" class="mono">-</div>
+              </article>
+            </section>
+            <section class="card">
+              <h2>SLO Status</h2>
+              <pre id="ops-slo" class="mono pre">yukleniyor...</pre>
+            </section>
+          </section>
+
+            <section data-view="integrations" class="view" hidden>
+              <section class="grid">
+                <article class="card stat">
+                  <h2>Webhooks</h2>
+                  <div id="int-webhooks" class="mono">-</div>
+              </article>
+              <article class="card stat">
+                <h2>Connectors</h2>
+                <div id="int-connectors" class="mono">-</div>
+              </article>
+                <article class="card stat">
+                  <h2>Plugins</h2>
+                  <div id="int-plugins" class="mono">-</div>
+                </article>
+                <article class="card stat">
+                  <h2>Assets</h2>
+                  <div id="int-assets" class="mono">-</div>
+                </article>
+              </section>
+            <section class="card">
+              <h2>Durum</h2>
+              <p id="int-status" class="sub">yukleniyor...</p>
+            </section>
+          </section>
+
+          <section data-view="security" class="view" hidden>
+            <section class="grid">
+              <article class="card stat">
+                <h2>Audit Verify</h2>
+                <div id="sec-audit-ok" class="mono">-</div>
+              </article>
+              <article class="card stat">
+                <h2>Checklist</h2>
+                <div id="sec-checklist-lines" class="mono">-</div>
+              </article>
+            </section>
+            <section class="card">
+              <h2>Security Checklist</h2>
+              <pre id="sec-checklist" class="mono pre">yukleniyor...</pre>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
 
     <script type="module" src="/app/dashboard.js"></script>
   </body>

@@ -36,6 +36,11 @@ Query params:
 
 - `limit`
 - `publishId`
+- `GET /api/v1/history/stream` SSE ile canli event akisina abone eder (opsiyonel `publishId` filtresi)
+
+## Auth Context Endpoint
+
+- `GET /api/v1/auth/me`: aktif rol/tenant context doner (`admin`/`editor`)
 
 ## Compliance Endpoints
 
@@ -58,7 +63,15 @@ Compliance status:
 
 - `POST /api/v1/analytics/ingest`: CTR/retention/watch/completion metriklerini kaydeder
 - `GET /api/v1/analytics/report?publishId=...`: performans ve optimizasyon raporunu doner
+- `GET /api/v1/analytics/feature-store`: tenant bazli kanal/icerik segment feature snapshot'i
+- `GET /api/v1/experiments`: A/B experiment listesi
+- `POST /api/v1/experiments`: yeni A/B experiment olusturur
+- `POST /api/v1/experiments/assign`: subject/publish icin deterministic variant atar
+- `POST /api/v1/experiments/metrics`: guardrail metric eventi kaydeder
+- `GET /api/v1/experiments/report?experimentId=...`: varyant bazli guardrail raporu
 - `POST /api/v1/optimize/run`: manuel optimize job kuyruğa ekler
+- `POST /api/v1/performance/predict`: publish oncesi tahmini CTR/retention/completion metriklerini doner
+- `POST /api/v1/optimize/cost-aware`: maliyet-kalite dengeli render preset/format onerisi uretir
 
 Optimizasyon davranisi:
 
@@ -68,6 +81,7 @@ Optimizasyon davranisi:
 ## Ops Endpoints
 
 - `GET /api/v1/ops/metrics`: HTTP/worker metrik snapshot'i (admin)
+- `GET /api/v1/ops/status`: operational/degraded durumu + deploy marker (admin)
 - `GET /api/v1/ops/dlq`: dead-letter queue kayitlari (admin)
 - `GET /api/v1/ops/autoscale`: queue tabanli worker autoscale plani (admin)
 - `GET /api/v1/ops/slo`: SLO/SLA durum ozeti (admin)
@@ -75,6 +89,12 @@ Optimizasyon davranisi:
 - `GET /api/v1/ops/db/profile`: query profile snapshot (admin)
 - `GET /api/v1/ops/cache`: cache stats
 - `POST /api/v1/ops/cache/invalidate`: cache prefix temizligi
+- `GET /api/v1/ops/reliability/policy`: queue backpressure + circuit-breaker policy snapshot (admin)
+- `GET /api/v1/ops/runbook`: incident runbook markdown (admin)
+- `POST /api/v1/ops/postmortem/export`: postmortem markdown export (admin)
+- `GET /api/v1/ops/deploy/strategy`: canary + blue/green rollout state (admin)
+- `POST /api/v1/ops/deploy/canary`: canary yuzdesi gunceller (admin)
+- `POST /api/v1/ops/deploy/switch`: aktif blue/green rengi degistirir (admin)
 - `GET /api/v1/openapi`: API kontratini YAML olarak verir
 
 ## Audit Endpoints
@@ -88,6 +108,8 @@ Optimizasyon davranisi:
 - `POST /api/v1/privacy/retention/apply`: retention policy uygular (admin)
 - `POST /api/v1/privacy/erase-publish`: publish bagli verileri siler (admin)
 - `POST /api/v1/ops/dr/drill`: backup/restore drill calistirir (admin)
+- `GET /api/v1/ops/dr/multi-region/status`: multi-region DR automation status + son olcum (admin)
+- `POST /api/v1/ops/dr/multi-region/run`: multi-region backup/restore drill + RPO/RTO olcumu (admin)
 
 ## Channel Endpoints
 
@@ -99,6 +121,7 @@ Optimizasyon davranisi:
 
 - `GET /api/v1/billing/usage`: usage eventleri ve aggregate billing ozeti
 - `GET /api/v1/billing/invoice`: aylik fatura ozeti ve line item dagilimi
+- `POST /api/v1/billing/activation`: tenant icin `trial` veya `freemium` aktivasyonu (admin)
 
 ## Tenancy Endpoints
 
@@ -106,6 +129,8 @@ Optimizasyon davranisi:
 - `POST /api/v1/tenants`: yeni tenant olusturma (admin)
 - `GET /api/v1/tenants/me`: aktif tenant context bilgisi
 - `PATCH /api/v1/tenants/me/settings`: plan/ayar guncelleme (admin)
+- `POST /api/v1/onboarding/self-serve`: self-serve onboarding ile tenant + ilk kanal olusturur
+- `GET /api/v1/onboarding/status`: in-app guided setup + empty-state ilerleme durumu
 - `x-tenant-id` header'i ile tenant context secilebilir (varsayilan `t_default`)
 
 Plan ve limit davranisi:
@@ -114,6 +139,12 @@ Plan ve limit davranisi:
 - Limit enforcement: rate limit + aylik kota
 - `free` planda kota asiminda `402 quota exceeded`
 - `pro/business` planda overage metadata ile metering devam eder
+
+## Reporting Endpoints
+
+- `GET /api/v1/reports/export?dataset=history|publish|usage|audit&format=json|csv|pdf`: rapor export
+- `GET /api/v1/reports/schedules`: tenant rapor schedule listesi
+- `POST /api/v1/reports/schedules`: scheduled report delivery (simulated email)
 
 ## Ecosystem Endpoints
 
@@ -124,6 +155,11 @@ Plan ve limit davranisi:
 - `GET /api/v1/plugins`: plugin listesi
 - `POST /api/v1/plugins/register`: plugin kaydi
 - `POST /api/v1/plugins/execute`: hook tetikleme
+- `GET /api/v1/assets/library`: asset library listesi (type/assetKey filtreli)
+- `POST /api/v1/assets/library`: asset versiyonu ekler (`version` otomatik artar)
+- `GET /api/v1/marketplace/plugins`: marketplace katalogu
+- `POST /api/v1/marketplace/partners/apply`: partner onboarding basvurusu
+- `GET /api/v1/marketplace/partners/applications`: tenant partner basvurulari
 
 ## Developer Portal & API Keys
 
@@ -136,6 +172,10 @@ Plan ve limit davranisi:
 
 - `POST /api/v1/auth/sso/login`: OIDC/SAML test-token login
 - `GET /api/v1/security/checklist`: security hardening checklist (admin)
+- `GET /api/v1/enterprise/compliance-pack`: SOC2 readiness kontrol/kanit paketi (admin)
+- `GET /api/v1/enterprise/sla-tiers`: SLA tier tanimlari
+- `POST /api/v1/enterprise/support/incidents`: enterprise support incident acma
+- `GET /api/v1/enterprise/support/incidents`: tenant support incident listesi
 
 ## YouTube Endpoint
 
@@ -147,6 +187,11 @@ YouTube publish:
 
 - Publish worker asamasinda `publishVideoToYouTube` adapter'i cagrilir
 - `YOUTUBE_PUBLISH_MODE=mock` (default) veya `YOUTUBE_PUBLISH_MODE=live`
+- Render worker `VIDEO_RENDER_MODE` ile calisir: `mock` (placeholder asset), `ffmpeg` (gercek mp4), `auto` (ffmpeg->mock fallback)
+- FFmpeg binary/sure ayari: `FFMPEG_BIN`, `VIDEO_RENDER_DURATION_SEC`
+- Render preset profilleri: `VIDEO_RENDER_PRESET=fast|balanced|quality` (hiz-kalite-maliyet dengesi)
+- Template katmani: `VIDEO_RENDER_TEMPLATE=basic|minimal` + intro/outro/lower-third text env'leri
+- Multi-format cikti: `VIDEO_RENDER_FORMAT=shorts|reels|tiktok|youtube` (portrait/landscape profil secimi)
 
 ## Auth / RBAC
 
@@ -159,6 +204,7 @@ YouTube publish:
 ## Dashboard
 
 `GET /app/dashboard` uzerinden basit web paneli acilir.
+`GET /status` uzerinden ops status page acilir.
 
 ## Adapterlar
 
@@ -180,6 +226,8 @@ YouTube publish:
 - Worker job'larinda retry mekanizmasi vardir (`JOB_MAX_ATTEMPTS`)
 - Max deneme asilirsa job DLQ'ya tasinir
 - Idempotency store, ayni `jobId`'nin tekrar islenmesini engeller
+- Queue backpressure: `QUEUE_BACKPRESSURE_SOFT_LIMIT` ustunde enqueue defer, `QUEUE_BACKPRESSURE_HARD_LIMIT` ustunde yeni job kabul edilmez (`503`)
+- Circuit-breaker: YouTube/connector adapterlari tekrarli hata aldiginda gecici olarak acilir ve `503 upstream temporarily unavailable` doner
 
 ## Not
 

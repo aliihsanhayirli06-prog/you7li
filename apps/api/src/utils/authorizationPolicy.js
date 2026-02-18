@@ -7,6 +7,7 @@ const ROLE_PERMISSIONS = {
     "history.read",
     "analytics.read",
     "analytics.ingest",
+    "performance.predict",
     "compliance.read",
     "compliance.check",
     "review.read",
@@ -24,6 +25,8 @@ function routePermission(method, pathname) {
   if (method === "GET" && pathname === "/api/v1/history") return "history.read";
   if (method === "GET" && pathname === "/api/v1/analytics/report") return "analytics.read";
   if (method === "POST" && pathname === "/api/v1/analytics/ingest") return "analytics.ingest";
+  if (method === "POST" && pathname === "/api/v1/performance/predict")
+    return "performance.predict";
   if (method === "GET" && pathname === "/api/v1/compliance/report") return "compliance.read";
   if (method === "POST" && pathname === "/api/v1/compliance/check") return "compliance.check";
   if (method === "GET" && pathname === "/api/v1/review/queue") return "review.read";

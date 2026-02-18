@@ -71,3 +71,58 @@ export async function patchTenantSettings(tenantId, patch) {
   }
   return updateTenantSettings(tenantId, patch);
 }
+
+function parsePositiveNumber(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+export async function activateTrialForTenant(
+  tenantId,
+  { durationDays = 14, monthlyUnitsOverride = 3000, ratePerMinuteOverride = 120 } = {}
+) {
+  if (!tenantId) throw new Error("TENANT_ID_REQUIRED");
+  const current = await getTenantById(tenantId);
+  if (!current) return null;
+
+  const now = new Date();
+  const days = parsePositiveNumber(durationDays, 14);
+  const trialEndsAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+  return updateTenantSettings(tenantId, {
+    settings: {
+      ...(current.settings || {}),
+      billingMode: "trial",
+      trialActive: true,
+      trialStartedAt: now.toISOString(),
+      trialEndsAt: trialEndsAt.toISOString(),
+      trialDurationDays: days,
+      monthlyUnitsOverride: parsePositiveNumber(monthlyUnitsOverride, 3000),
+      ratePerMinuteOverride: parsePositiveNumber(ratePerMinuteOverride, 120)
+    }
+  });
+}
+
+export async function activateFreemiumForTenant(
+  tenantId,
+  { monthlyUnitsOverride = null, ratePerMinuteOverride = null } = {}
+) {
+  if (!tenantId) throw new Error("TENANT_ID_REQUIRED");
+  const current = await getTenantById(tenantId);
+  if (!current) return null;
+
+  return updateTenantSettings(tenantId, {
+    planCode: "free",
+    settings: {
+      ...(current.settings || {}),
+      billingMode: "freemium",
+      trialActive: false,
+      trialEndedAt: new Date().toISOString(),
+      monthlyUnitsOverride:
+        monthlyUnitsOverride == null ? null : parsePositiveNumber(monthlyUnitsOverride, null),
+      ratePerMinuteOverride:
+        ratePerMinuteOverride == null ? null : parsePositiveNumber(ratePerMinuteOverride, null)
+    }
+  });
+}

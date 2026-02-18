@@ -2,21 +2,27 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPool, shouldUsePostgres } from "./db.js";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const PUBLISH_FILE = path.join(DATA_DIR, "publishes.json");
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getPublishesFile() {
+  return path.join(getDataDir(), "publishes.json");
+}
 
 async function ensureFile() {
-  await mkdir(DATA_DIR, { recursive: true });
+  const file = getPublishesFile();
+  await mkdir(path.dirname(file), { recursive: true });
   try {
-    await readFile(PUBLISH_FILE, "utf8");
+    await readFile(file, "utf8");
   } catch {
-    await writeFile(PUBLISH_FILE, "[]", "utf8");
+    await writeFile(file, "[]", "utf8");
   }
 }
 
 async function readAllFromFile() {
   await ensureFile();
-  const raw = await readFile(PUBLISH_FILE, "utf8");
+  const raw = await readFile(getPublishesFile(), "utf8");
 
   try {
     const parsed = JSON.parse(raw);
@@ -27,7 +33,7 @@ async function readAllFromFile() {
 }
 
 async function writeAllToFile(items) {
-  await writeFile(PUBLISH_FILE, JSON.stringify(items, null, 2), "utf8");
+  await writeFile(getPublishesFile(), JSON.stringify(items, null, 2), "utf8");
 }
 
 function normalizeRecord(record) {

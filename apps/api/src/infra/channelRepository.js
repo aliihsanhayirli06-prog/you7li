@@ -2,8 +2,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPool, shouldUsePostgres } from "./db.js";
 
-const DATA_DIR = process.env.DATA_DIR || "data";
-const CHANNELS_FILE = path.join(DATA_DIR, "channels.json");
+function getDataDir() {
+  return process.env.DATA_DIR || "data";
+}
+
+function getChannelsFile() {
+  return path.join(getDataDir(), "channels.json");
+}
 const DEFAULT_CHANNEL = {
   channelId: "ch_default",
   tenantId: "t_default",
@@ -13,17 +18,18 @@ const DEFAULT_CHANNEL = {
 };
 
 async function ensureFile() {
-  await mkdir(DATA_DIR, { recursive: true });
+  const file = getChannelsFile();
+  await mkdir(path.dirname(file), { recursive: true });
   try {
-    await readFile(CHANNELS_FILE, "utf8");
+    await readFile(file, "utf8");
   } catch {
-    await writeFile(CHANNELS_FILE, JSON.stringify([DEFAULT_CHANNEL], null, 2), "utf8");
+    await writeFile(file, JSON.stringify([DEFAULT_CHANNEL], null, 2), "utf8");
   }
 }
 
 async function readFromFile() {
   await ensureFile();
-  const raw = await readFile(CHANNELS_FILE, "utf8");
+  const raw = await readFile(getChannelsFile(), "utf8");
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [DEFAULT_CHANNEL];
@@ -33,7 +39,7 @@ async function readFromFile() {
 }
 
 async function writeToFile(items) {
-  await writeFile(CHANNELS_FILE, JSON.stringify(items, null, 2), "utf8");
+  await writeFile(getChannelsFile(), JSON.stringify(items, null, 2), "utf8");
 }
 
 function mapRow(row) {

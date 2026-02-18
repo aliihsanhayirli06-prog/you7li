@@ -134,6 +134,7 @@ Detayli urun notlari:
 - Job idempotency store ayni job'un tekrar islenmesini engeller.
 - Queue backpressure politikasi aktif: soft limitte enqueue gecikmeli, hard limitte yeni job `503` ile reddedilir.
 - YouTube/connector entegrasyonlarinda circuit-breaker bulunur; ard arda hata durumunda gecici `503` doner.
+- Tenant bazli provider cost guardrail ile voice/video provider cagrilari butce asiminda `402` ile kontrollu reddedilir.
 - `GET /api/v1/ops/metrics` endpoint'i worker/http metrik snapshot'i verir (admin).
 - DLQ kayitlari `GET /api/v1/ops/dlq` ile izlenebilir (admin).
 - `GET /api/v1/youtube/stats?videoId=...` YouTube video istatistiklerini canli ceker.

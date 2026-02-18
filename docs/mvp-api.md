@@ -142,6 +142,7 @@ Plan ve limit davranisi:
 - Limit enforcement: rate limit + aylik kota
 - `free` planda kota asiminda `402 quota exceeded`
 - `pro/business` planda overage metadata ile metering devam eder
+- Provider cost guardrail aktifse tenant bazli provider butce asiminda `402 provider cost limit exceeded`
 
 ## Reporting Endpoints
 

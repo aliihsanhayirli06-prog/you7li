@@ -268,3 +268,58 @@ test("billing activation switches tenant between trial and freemium modes", asyn
     await app.close();
   }
 });
+
+test("provider cost guardrail blocks tenant provider calls over budget", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-tenant-"));
+  process.env.PROVIDER_COST_GUARDRAIL_ENABLED = "true";
+
+  const app = await startTestServer();
+  try {
+    const tenantId = `t_provider_budget_${Date.now()}`;
+    const tenantRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/tenants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantId,
+        name: "Provider Budget Tenant",
+        planCode: "free",
+        settings: { providerBudgetUsdOverride: 0.002 }
+      })
+    });
+    assert.equal(tenantRes.status, 201);
+
+    const blocked = await fetch(`http://127.0.0.1:${app.port}/api/v1/voice/generate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-tenant-id": tenantId
+      },
+      body: JSON.stringify({
+        topic: "provider budget",
+        script: "kisa test script"
+      })
+    });
+    const blockedBody = await blocked.json();
+    assert.equal(blocked.status, 402);
+    assert.equal(blockedBody.error, "provider cost limit exceeded");
+
+    const pipelineNoMedia = await fetch(`http://127.0.0.1:${app.port}/api/v1/pipeline/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-tenant-id": tenantId
+      },
+      body: JSON.stringify({
+        topic: "provider budget pipeline",
+        generateMedia: false
+      })
+    });
+    assert.equal(pipelineNoMedia.status, 200);
+  } finally {
+    await app.close();
+    delete process.env.PROVIDER_COST_GUARDRAIL_ENABLED;
+  }
+});

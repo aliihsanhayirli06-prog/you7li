@@ -42,7 +42,7 @@ import {
   getTenantList,
   patchTenantSettings
 } from "../services/tenantService.js";
-import { checkQuota, checkRateLimit } from "../services/limitService.js";
+import { checkProviderCostGuardrail, checkQuota, checkRateLimit } from "../services/limitService.js";
 import { getChannelById } from "../infra/channelRepository.js";
 import { decideReview, getReviewQueue } from "../services/reviewService.js";
 import { getAuditTrail, verifyAuditTrail } from "../services/auditService.js";
@@ -158,6 +158,25 @@ async function enforceCommercialLimits(req, res, action) {
   }
 
   return { tenant, usage: quota.usage };
+}
+
+async function enforceProviderCostLimits(req, res, tenant, actions = []) {
+  const guard = await checkProviderCostGuardrail({ tenant, actions });
+  if (guard.ok) return guard;
+
+  sendJson(res, 402, {
+    error: "provider cost limit exceeded",
+    tenantId: tenant.tenantId,
+    actions,
+    usage: guard.usage
+  });
+  return null;
+}
+
+function shouldGenerateMediaFromBody(value) {
+  if (value == null) return String(process.env.PIPELINE_AUTOGEN_MEDIA ?? "true") !== "false";
+  const normalized = String(value).toLowerCase();
+  return !(normalized === "false" || normalized === "0" || normalized === "no");
 }
 
 async function assertPublishTenantAccess(res, publishId, tenantId) {
@@ -1774,6 +1793,8 @@ export async function handleApi(req, res) {
       const quota = await enforceCommercialLimits(req, res, "voice.generate");
       if (!quota) return;
       const body = await readJsonBody(req);
+      const providerGuard = await enforceProviderCostLimits(req, res, quota.tenant, ["voice.generate"]);
+      if (!providerGuard) return;
       const payload = await generateVoiceover({
         topic: body.topic,
         script: body.script,
@@ -1820,6 +1841,8 @@ export async function handleApi(req, res) {
       const quota = await enforceCommercialLimits(req, res, "video.generate");
       if (!quota) return;
       const body = await readJsonBody(req);
+      const providerGuard = await enforceProviderCostLimits(req, res, quota.tenant, ["video.generate"]);
+      if (!providerGuard) return;
       const payload = await generateVisualAsset({
         topic: body.topic,
         prompt: body.prompt || "",
@@ -2100,6 +2123,14 @@ export async function handleApi(req, res) {
       const quota = await enforceCommercialLimits(req, res, "pipeline.run");
       if (!quota) return;
       const body = await readJsonBody(req);
+      const wantsMedia = shouldGenerateMediaFromBody(body.generateMedia);
+      if (wantsMedia) {
+        const providerGuard = await enforceProviderCostLimits(req, res, quota.tenant, [
+          "voice.generate",
+          "video.generate"
+        ]);
+        if (!providerGuard) return;
+      }
       const topicInput = Array.isArray(body.topics) && body.topics.length > 0 ? body.topics : body.topic;
       const result = await runPipeline(topicInput, body.channelId || null, req.tenantId, {
         generateMedia: body.generateMedia
@@ -2111,6 +2142,28 @@ export async function handleApi(req, res) {
         publishId: result.publish?.publishId || null,
         metadata: { overage: quota.usage.overage }
       });
+      if (result.media?.enabled) {
+        if (result.media.voice) {
+          await recordUsage("voice.generate", {
+            actorRole: req.userRole,
+            tenantId: req.tenantId,
+            channelId: result.publish?.channelId || body.channelId || null,
+            publishId: result.publish?.publishId || null,
+            units: 0,
+            metadata: { source: "pipeline", overage: quota.usage.overage }
+          });
+        }
+        if (result.media.visual) {
+          await recordUsage("video.generate", {
+            actorRole: req.userRole,
+            tenantId: req.tenantId,
+            channelId: result.publish?.channelId || body.channelId || null,
+            publishId: result.publish?.publishId || null,
+            units: 0,
+            metadata: { source: "pipeline", overage: quota.usage.overage }
+          });
+        }
+      }
       return sendJson(res, 200, result);
     } catch (error) {
       if (isBackpressureError(error)) {

@@ -14,10 +14,11 @@
 - [x] API version/deprecation policy ve migration playbook dokumantasyonu eklendi
 - [x] Offline eval dataset + otomatik kalite regression raporu endpoint/script/test seti eklendi
 - [x] Provider telemetry esik alarmi + otomatik incident tetikleme endpoint/script/test eklendi
+- [x] Tenant bazli provider cost guardrail ve butce limiti (voice/video + pipeline media) eklendi
 
 ### Siradaki isler
 
-- [ ] Tenant bazli provider cost guardrail ve butce limiti (F18)
+- [ ] Her release'te otomatik kalite regression raporu uretimini CI/release gate'e bagla (F18)
 
 ## F0 - Foundation
 
@@ -259,7 +260,7 @@
 - [x] API version/deprecation policy dokumani ve migration playbook
 - [x] Offline eval dataset + otomatik kalite regression raporu
 - [x] Provider telemetry alarm/esik yonetimi + otomatik incident tetikleme
-- [ ] Tenant bazli provider cost guardrail ve butce limiti
+- [x] Tenant bazli provider cost guardrail ve butce limiti
 
 ### Teknik Kirilim
 
@@ -267,14 +268,14 @@
 - [x] `docs/api/openapi.yaml` icinde versioning/deprecation notlari
 - [x] `tests/api/*` altina kalite regression fixture ve score-comparison testleri
 - [x] `apps/api/src/services/alertingService.js` icine provider esik alarmlari
-- [ ] `apps/api/src/services/billingService.js` ve `limitService.js` icine provider-cost quota
+- [x] `apps/api/src/services/billingService.js` ve `limitService.js` icine provider-cost quota
 
 ### Teslim Kriterleri
 
 - [x] Prompt compliance skoru esik altindaysa full rollout engellenir
 - [ ] Her release'te otomatik kalite regression raporu uretilir
 - [x] Provider timeout/error-rate esikleri alarm ureterek runbook akisini tetikler
-- [ ] Tenant bazli cost limiti asilinca yeni provider cagrilari kontrollu reddedilir
+- [x] Tenant bazli cost limiti asilinca yeni provider cagrilari kontrollu reddedilir
 
 ### Sprint Onerisi
 

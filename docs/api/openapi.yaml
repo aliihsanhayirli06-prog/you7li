@@ -2,7 +2,27 @@ openapi: 3.0.3
 info:
   title: you7li API
   version: 1.0.0
-  description: YouTube content pipeline API
+  description: |
+    YouTube content pipeline API.
+    Versioning policy:
+    - Stable major path: `/api/v1/*`
+    - Breaking changes require new major path (example: `/api/v2/*`)
+    - Backward-compatible additions are allowed in current major
+    Deprecation policy:
+    - Deprecated endpoints remain available for at least 90 days
+    - Deprecation and sunset dates are published in release notes and migration playbook
+  x-api-lifecycle:
+    currentMajor: v1
+    deprecationWindowDays: 90
+    migrationPlaybook: docs/api/migration-playbook.md
+    nonBreakingChanges:
+      - new optional fields
+      - new endpoints
+      - enum value additions with fallback-safe defaults
+    breakingChanges:
+      - removing fields
+      - changing required request/response contracts
+      - semantic behavior changes requiring client code update
 servers:
   - url: http://localhost:8787
 paths:
@@ -21,13 +41,121 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                topic:
+                  type: string
+                topics:
+                  type: array
+                  items:
+                    type: string
+                generateMedia:
+                  type: boolean
+      responses:
+        "200":
+          description: Pipeline result (contract v3, backward compatible)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineRunResponseV3"
+  /api/v1/strategy/score:
+    post:
+      summary: Score a topic with 7 strategy engines and fusion breakdown
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
               required: [topic]
               properties:
                 topic:
                   type: string
       responses:
         "200":
-          description: Pipeline result
+          description: Strategy score payload
+  /api/v1/fusion/select-topic:
+    post:
+      summary: Select best topic from candidates using fusion logic
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topics]
+              properties:
+                topics:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Selected topic and ranked list
+  /api/v1/voice/generate:
+    post:
+      summary: Generate AI voiceover asset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic, script]
+              properties:
+                topic:
+                  type: string
+                script:
+                  type: string
+                language:
+                  type: string
+                voice:
+                  type: string
+      responses:
+        "200":
+          description: Voice generation result
+  /api/v1/video/generate:
+    post:
+      summary: Generate visual/video asset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic]
+              properties:
+                topic:
+                  type: string
+                prompt:
+                  type: string
+                format:
+                  type: string
+      responses:
+        "200":
+          description: Visual generation result
+  /api/v1/seo/generate:
+    post:
+      summary: Generate SEO metadata (title, description, keywords, hashtags)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic]
+              properties:
+                topic:
+                  type: string
+                script:
+                  type: string
+                format:
+                  type: string
+                language:
+                  type: string
+      responses:
+        "200":
+          description: SEO metadata payload
   /api/v1/publish:
     get:
       summary: List publishes
@@ -67,6 +195,42 @@ paths:
       responses:
         "200":
           description: Metrics payload
+  /api/v1/ops/eval/dataset:
+    get:
+      summary: Offline evaluation dataset snapshot (admin)
+      responses:
+        "200":
+          description: Evaluation dataset list
+  /api/v1/ops/eval/regression/run:
+    post:
+      summary: Run offline quality regression report (admin)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxItems:
+                  type: integer
+      responses:
+        "200":
+          description: Regression report payload
+  /api/v1/ops/alerts/provider/check:
+    post:
+      summary: Evaluate provider telemetry thresholds and open incidents (admin)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tenantId:
+                  type: string
+      responses:
+        "200":
+          description: Provider alert evaluation result
   /api/v1/audit/trail:
     get:
       summary: List audit trail events (admin)
@@ -230,3 +394,93 @@ paths:
       responses:
         "200":
           description: Checklist content
+
+components:
+  schemas:
+    PipelineRunResponseV3:
+      type: object
+      required: [contract, promptCompliance, strategy, opportunity, script, seo, media, publish]
+      properties:
+        contract:
+          type: object
+          required: [version, backwardCompatibleWith, legacyFields, generatedAt]
+          properties:
+            version:
+              type: string
+              example: v3
+            backwardCompatibleWith:
+              type: array
+              items:
+                type: string
+            legacyFields:
+              type: array
+              items:
+                type: string
+            generatedAt:
+              type: string
+              format: date-time
+        promptCompliance:
+          type: object
+          required: [scorePercent, passedChecks, totalChecks, checks]
+          properties:
+            scorePercent:
+              type: number
+            passedChecks:
+              type: integer
+            totalChecks:
+              type: integer
+            checks:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  ok:
+                    type: boolean
+                  weight:
+                    type: number
+        strategy:
+          type: object
+          properties:
+            selectedTopic:
+              type: string
+            finalScore:
+              type: number
+        opportunity:
+          type: object
+          properties:
+            topic:
+              type: string
+            opportunityScore:
+              type: number
+        script:
+          type: object
+          properties:
+            topic:
+              type: string
+            script:
+              type: string
+        seo:
+          type: object
+          properties:
+            title:
+              type: string
+            description:
+              type: string
+            keywords:
+              type: array
+              items:
+                type: string
+        media:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+        publish:
+          type: object
+          properties:
+            publishId:
+              type: string
+            status:
+              type: string

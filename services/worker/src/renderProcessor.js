@@ -1,7 +1,11 @@
 import { enqueue } from "../../../apps/api/src/infra/queueClient.js";
-import { updatePublishRender } from "../../../apps/api/src/infra/publishRepository.js";
+import {
+  updatePublishRender,
+  updatePublishStatus
+} from "../../../apps/api/src/infra/publishRepository.js";
 import { logHistory } from "../../../apps/api/src/services/historyService.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { queueComplianceReview } from "../../../apps/api/src/services/reviewService.js";
+import { access, mkdir, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
@@ -54,6 +58,15 @@ function getRenderFormatName() {
   const value = String(process.env.VIDEO_RENDER_FORMAT || "shorts").toLowerCase();
   if (value === "reels" || value === "tiktok" || value === "youtube") return value;
   return "shorts";
+}
+
+function getQualityGatePolicy() {
+  const minBytes = Number(process.env.MEDIA_QUALITY_MIN_BYTES || 16);
+  const maxBytes = Number(process.env.MEDIA_QUALITY_MAX_BYTES || 50 * 1024 * 1024);
+  return {
+    minBytes: Number.isFinite(minBytes) ? Math.max(16, minBytes) : 128,
+    maxBytes: Number.isFinite(maxBytes) ? Math.max(1024, maxBytes) : 50 * 1024 * 1024
+  };
 }
 
 export function resolveRenderPreset(presetName = "balanced") {
@@ -187,7 +200,7 @@ function runProcess(bin, args, timeoutMs = 20000) {
   });
 }
 
-async function ensureFfmpegAsset(filePath, topic = "") {
+async function ensureFfmpegAsset(filePath, topic = "", options = {}) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const ffmpeg = getFfmpegBin();
   const duration = getRenderDurationSec();
@@ -197,17 +210,47 @@ async function ensureFfmpegAsset(filePath, topic = "") {
   const formatName = getRenderFormatName();
   const format = resolveRenderFormat(formatName);
   const filter = buildTemplateFilter({ topic, duration, templateName });
+  const composeAudio =
+    typeof options.audioAssetPath === "string" ? options.audioAssetPath : null;
+  const composeVisual =
+    typeof options.visualAssetPath === "string" ? options.visualAssetPath : null;
+
+  let hasVisualAsset = false;
+  let hasAudioAsset = false;
+  if (composeVisual) {
+    try {
+      await access(composeVisual);
+      hasVisualAsset = true;
+    } catch {
+      hasVisualAsset = false;
+    }
+  }
+  if (composeAudio) {
+    try {
+      await access(composeAudio);
+      hasAudioAsset = true;
+    } catch {
+      hasAudioAsset = false;
+    }
+  }
+
+  const videoInputArgs = hasVisualAsset
+    ? ["-loop", "1", "-i", composeVisual]
+    : [
+        "-f",
+        "lavfi",
+        "-i",
+        `color=c=#1b7f79:s=${format.width}x${format.height}:d=${duration}:r=${preset.fps}`
+      ];
+
+  const audioInputArgs = hasAudioAsset
+    ? ["-i", composeAudio]
+    : ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"];
 
   const baseArgs = [
     "-y",
-    "-f",
-    "lavfi",
-    "-i",
-    `color=c=#1b7f79:s=${format.width}x${format.height}:d=${duration}:r=${preset.fps}`,
-    "-f",
-    "lavfi",
-    "-i",
-    "anullsrc=r=44100:cl=stereo",
+    ...videoInputArgs,
+    ...audioInputArgs,
     "-vf",
     filter,
     "-r",
@@ -218,6 +261,7 @@ async function ensureFfmpegAsset(filePath, topic = "") {
     "-c:a",
     "aac"
   ];
+  let codec = "libx264";
 
   try {
     await runProcess(
@@ -235,10 +279,35 @@ async function ensureFfmpegAsset(filePath, topic = "") {
         filePath
       ]
     );
-    return;
   } catch {
+    codec = "mpeg4";
     await runProcess(ffmpeg, [...baseArgs, "-c:v", "mpeg4", filePath]);
   }
+
+  return {
+    hasAudioAsset,
+    hasVisualAsset,
+    codec
+  };
+}
+
+async function validateRenderedAsset(filePath) {
+  const policy = getQualityGatePolicy();
+  const file = await stat(filePath);
+  const bytes = Number(file.size || 0);
+  const errors = [];
+  if (bytes < policy.minBytes) {
+    errors.push(`size_too_small:${bytes}<${policy.minBytes}`);
+  }
+  if (bytes > policy.maxBytes) {
+    errors.push(`size_too_large:${bytes}>${policy.maxBytes}`);
+  }
+  return {
+    ok: errors.length === 0,
+    bytes,
+    policy,
+    errors
+  };
 }
 
 export async function processRenderJob(job) {
@@ -266,17 +335,61 @@ export async function processRenderJob(job) {
   const presetName = getRenderPresetName();
   const templateName = getRenderTemplateName();
   const formatName = getRenderFormatName();
+  let compose = {
+    hasAudioAsset: false,
+    hasVisualAsset: false,
+    codec: null
+  };
 
   if (mode === "ffmpeg") {
-    await ensureFfmpegAsset(videoAssetPath, job.topic);
+    compose = await ensureFfmpegAsset(videoAssetPath, job.topic, {
+      audioAssetPath: job.audioAssetPath || null,
+      visualAssetPath: job.visualAssetPath || null
+    });
   } else if (mode === "auto") {
     try {
-      await ensureFfmpegAsset(videoAssetPath, job.topic);
+      compose = await ensureFfmpegAsset(videoAssetPath, job.topic, {
+        audioAssetPath: job.audioAssetPath || null,
+        visualAssetPath: job.visualAssetPath || null
+      });
     } catch {
       await ensureMockAsset(videoAssetPath);
     }
   } else {
     await ensureMockAsset(videoAssetPath);
+  }
+
+  const quality = await validateRenderedAsset(videoAssetPath);
+  if (!quality.ok) {
+    await updatePublishRender({
+      publishId: job.publishId,
+      renderStatus: "failed_quality_gate",
+      renderedAt,
+      videoAssetUrl,
+      videoAssetPath
+    });
+    await updatePublishStatus({
+      publishId: job.publishId,
+      status: "review"
+    });
+    await queueComplianceReview({
+      tenantId: job.tenantId || "t_default",
+      publishId: job.publishId,
+      channelId: job.channelId || null,
+      reason: "Media quality gate failed",
+      riskScore: 65,
+      categories: ["media_quality"]
+    });
+    await logHistory("render.quality_gate_failed", {
+      publishId: job.publishId,
+      channelId: job.channelId || null,
+      topic: job.topic,
+      quality
+    });
+    return {
+      publishId: job.publishId,
+      renderStatus: "failed_quality_gate"
+    };
   }
 
   const updated = await updatePublishRender({
@@ -296,7 +409,11 @@ export async function processRenderJob(job) {
     renderMode: mode,
     renderPreset: presetName,
     renderTemplate: templateName,
-    renderFormat: formatName
+    renderFormat: formatName,
+    composeAudioAsset: compose.hasAudioAsset,
+    composeVisualAsset: compose.hasVisualAsset,
+    videoCodec: compose.codec || null,
+    quality
   });
 
   await enqueue({

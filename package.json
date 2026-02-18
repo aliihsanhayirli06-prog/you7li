@@ -9,6 +9,8 @@
     "start": "node apps/api/src/server.js",
     "worker": "node services/worker/src/worker.js",
     "migrate": "node apps/api/src/scripts/migrate.js",
+    "quality:regression": "node apps/api/src/scripts/runQualityRegression.js",
+    "alerts:provider": "node apps/api/src/scripts/checkProviderAlerts.js",
     "test": "node --test",
     "lint": "node --check apps/api/src/server.js apps/api/src/routes/api.js apps/api/src/services/*.js apps/api/src/infra/*.js apps/api/src/utils/http.js apps/api/src/scripts/*.js services/worker/src/*.js tests/api/*.test.js",
     "format": "prettier --write \"**/*.{js,json,md,yml,yaml,css,html}\"",

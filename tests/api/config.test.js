@@ -128,3 +128,29 @@ test("validateConfig fails on invalid video render format", () => {
     }
   );
 });
+
+test("validateConfig fails on invalid provider retry configuration", () => {
+  withEnv(
+    {
+      AUTH_ENABLED: "false",
+      YOUTUBE_PUBLISH_MODE: "mock",
+      VOICE_PROVIDER_MAX_RETRIES: "abc"
+    },
+    () => {
+      assert.throws(() => validateConfig("test"), /CONFIG_VALIDATION_FAILED/);
+    }
+  );
+});
+
+test("validateConfig fails on invalid provider timeout configuration", () => {
+  withEnv(
+    {
+      AUTH_ENABLED: "false",
+      YOUTUBE_PUBLISH_MODE: "mock",
+      VISUAL_PROVIDER_TIMEOUT_MS: "not-a-number"
+    },
+    () => {
+      assert.throws(() => validateConfig("test"), /CONFIG_VALIDATION_FAILED/);
+    }
+  );
+});

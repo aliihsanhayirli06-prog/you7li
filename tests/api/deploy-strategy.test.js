@@ -50,11 +50,13 @@ test("deploy strategy supports canary progression and blue/green switch", async 
     const promotedRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/ops/deploy/canary`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ percent: 100 })
+      body: JSON.stringify({ percent: 100, promptComplianceScore: 92 })
     });
     const promoted = await promotedRes.json();
     assert.equal(promotedRes.status, 200);
     assert.equal(promoted.rolloutStage, "promoted");
+    assert.equal(promoted.releaseGate.status, "passed");
+    assert.equal(promoted.releaseGate.lastScore, 92);
 
     const switchRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/ops/deploy/switch`, {
       method: "POST",
@@ -74,5 +76,39 @@ test("deploy strategy supports canary progression and blue/green switch", async 
     assert.equal(opsStatus.deployStrategy.activeColor, "green");
   } finally {
     await app.close();
+  }
+});
+
+test("deploy strategy blocks 100 percent rollout when prompt compliance is below threshold", async () => {
+  process.env.STORAGE_DRIVER = "file";
+  process.env.QUEUE_DRIVER = "file";
+  process.env.AUTH_ENABLED = "false";
+  process.env.PROMPT_COMPLIANCE_MIN_SCORE = "85";
+  process.env.DATA_DIR = await mkdtemp(path.join(os.tmpdir(), "you7li-deploy-gate-"));
+
+  const app = await startTestServer();
+  try {
+    const blockedRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/ops/deploy/canary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ percent: 100, promptComplianceScore: 72 })
+    });
+    const blocked = await blockedRes.json();
+    assert.equal(blockedRes.status, 409);
+    assert.equal(blocked.error, "prompt compliance gate blocked full rollout");
+    assert.equal(blocked.minScore, 85);
+    assert.equal(blocked.score, 72);
+
+    const missingScoreRes = await fetch(`http://127.0.0.1:${app.port}/api/v1/ops/deploy/canary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ percent: 100 })
+    });
+    const missing = await missingScoreRes.json();
+    assert.equal(missingScoreRes.status, 400);
+    assert.equal(missing.error, "promptComplianceScore required for 100 percent rollout");
+  } finally {
+    await app.close();
+    delete process.env.PROMPT_COMPLIANCE_MIN_SCORE;
   }
 });

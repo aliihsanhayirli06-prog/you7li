@@ -112,6 +112,27 @@
             </section>
 
             <section class="card">
+              <div class="section-head">
+                <h2>Strategy Fusion</h2>
+                <span id="fusion-summary" class="mono">yukleniyor...</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Konu</th>
+                      <th>Final Score</th>
+                      <th>Revenue</th>
+                      <th>Search Intent</th>
+                      <th>Viral</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fusion-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card">
               <h2>Publish Durumlari</h2>
               <div class="table-wrap">
                 <table>
@@ -124,9 +145,45 @@
                       <th>Render</th>
                       <th>Optimize</th>
                       <th>Status</th>
+                      <th>SEO Secim</th>
                     </tr>
                   </thead>
                   <tbody id="publish-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card">
+              <h2>Videolar</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Publish ID</th>
+                      <th>Konu</th>
+                      <th>Render</th>
+                      <th>Durum</th>
+                      <th>Video Dosyasi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="videos-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card">
+              <h2>Kanallar</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Channel ID</th>
+                      <th>Ad</th>
+                      <th>YouTube Channel ID</th>
+                      <th>Dil</th>
+                    </tr>
+                  </thead>
+                  <tbody id="channels-body"></tbody>
                 </table>
               </div>
             </section>
@@ -147,9 +204,27 @@
                 <div id="ops-autoscale" class="mono">-</div>
               </article>
             </section>
+            <section class="grid">
+              <article class="card stat">
+                <h2>Provider Failures</h2>
+                <div id="ops-provider-failures" class="mono">-</div>
+              </article>
+              <article class="card stat">
+                <h2>Provider Retries</h2>
+                <div id="ops-provider-retries" class="mono">-</div>
+              </article>
+              <article class="card stat">
+                <h2>Provider Timeouts</h2>
+                <div id="ops-provider-timeouts" class="mono">-</div>
+              </article>
+            </section>
             <section class="card">
               <h2>SLO Status</h2>
               <pre id="ops-slo" class="mono pre">yukleniyor...</pre>
+            </section>
+            <section class="card">
+              <h2>Provider Telemetry</h2>
+              <pre id="ops-provider-telemetry" class="mono pre">yukleniyor...</pre>
             </section>
           </section>
 

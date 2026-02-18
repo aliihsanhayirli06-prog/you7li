@@ -3,8 +3,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { scoreOpportunity } from "../services/opportunityService.js";
 import { generateScript } from "../services/scriptService.js";
+import { generateVoiceover } from "../services/voiceGenerationService.js";
+import { generateVisualAsset } from "../services/visualGenerationService.js";
+import { generateSeoMetadata } from "../services/seoService.js";
 import { createDraftPublish, getPublish, listPublishes } from "../services/publishService.js";
 import { runPipeline } from "../services/pipelineService.js";
+import { scoreStrategyForTopic, selectTopicByFusion } from "../services/strategyFusionService.js";
+import { getStrategySignalBundle } from "../services/strategySignalService.js";
 import { shouldUsePostgres } from "../infra/db.js";
 import { shouldUseRedis } from "../infra/redisClient.js";
 import {
@@ -98,6 +103,11 @@ import {
   getSoc2ReadinessPack,
   listSupportIncidents
 } from "../services/enterpriseService.js";
+import {
+  getOfflineEvalDataset,
+  runOfflineQualityRegression
+} from "../services/qualityRegressionService.js";
+import { checkProviderTelemetryAlerts } from "../services/alertingService.js";
 
 function badRequest(res, message) {
   sendJson(res, 400, { error: message });
@@ -849,12 +859,25 @@ export async function handleApi(req, res) {
     if (!authorize(req, res, ["admin"])) return;
     try {
       const body = await readJsonBody(req);
-      const state = await updateCanaryRollout(body.percent);
+      const state = await updateCanaryRollout(body.percent, {
+        promptComplianceScore: body.promptComplianceScore
+      });
       return sendJson(res, 200, state);
     } catch (error) {
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
       if (error.message === "INVALID_CANARY_PERCENT")
         return badRequest(res, "percent must be between 0 and 100");
+      if (error.message === "INVALID_PROMPT_COMPLIANCE_SCORE")
+        return badRequest(res, "promptComplianceScore must be between 0 and 100");
+      if (error.message === "PROMPT_COMPLIANCE_SCORE_REQUIRED")
+        return badRequest(res, "promptComplianceScore required for 100 percent rollout");
+      if (error.message === "PROMPT_COMPLIANCE_GATE_BLOCKED") {
+        return sendJson(res, 409, {
+          error: "prompt compliance gate blocked full rollout",
+          minScore: error?.meta?.minScore ?? null,
+          score: error?.meta?.promptComplianceScore ?? null
+        });
+      }
       return sendJson(res, 500, { error: "internal error" });
     }
   }
@@ -882,6 +905,40 @@ export async function handleApi(req, res) {
     if (!authorize(req, res, ["admin"])) return;
     const report = await getSloReport();
     return sendJson(res, 200, report);
+  }
+
+  if (method === "GET" && pathname === "/api/v1/ops/eval/dataset") {
+    if (!authorize(req, res, ["admin"])) return;
+    const dataset = await getOfflineEvalDataset();
+    return sendJson(res, 200, dataset);
+  }
+
+  if (method === "POST" && pathname === "/api/v1/ops/eval/regression/run") {
+    if (!authorize(req, res, ["admin"])) return;
+    try {
+      const body = await readJsonBody(req);
+      const report = await runOfflineQualityRegression({
+        maxItems: body?.maxItems
+      });
+      return sendJson(res, 200, report);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/ops/alerts/provider/check") {
+    if (!authorize(req, res, ["admin"])) return;
+    try {
+      const body = await readJsonBody(req);
+      const result = await checkProviderTelemetryAlerts({
+        tenantId: body?.tenantId || req.tenantId
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      return sendJson(res, 500, { error: "internal error" });
+    }
   }
 
   if (method === "GET" && pathname === "/api/v1/ops/capacity-plan") {
@@ -1190,6 +1247,65 @@ export async function handleApi(req, res) {
       return sendJson(res, 200, payload);
     } catch (error) {
       if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
+      if (error.message === "TENANT_NOT_FOUND")
+        return sendJson(res, 404, { error: "tenant not found" });
+      if (error.message === "TENANT_INACTIVE")
+        return sendJson(res, 403, { error: "tenant inactive" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/strategy/score") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    try {
+      const quota = await enforceCommercialLimits(req, res, "strategy.score");
+      if (!quota) return;
+      const body = await readJsonBody(req);
+      const signalBundle = await getStrategySignalBundle(body.topic);
+      const payload = scoreStrategyForTopic(body.topic, signalBundle);
+      await recordUsage("strategy.score", {
+        actorRole: req.userRole,
+        tenantId: req.tenantId,
+        metadata: { overage: quota.usage.overage }
+      });
+      return sendJson(res, 200, payload);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
+      if (error.message === "TENANT_NOT_FOUND")
+        return sendJson(res, 404, { error: "tenant not found" });
+      if (error.message === "TENANT_INACTIVE")
+        return sendJson(res, 403, { error: "tenant inactive" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/fusion/select-topic") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    try {
+      const quota = await enforceCommercialLimits(req, res, "fusion.select_topic");
+      if (!quota) return;
+      const body = await readJsonBody(req);
+      const normalizedTopics = Array.isArray(body.topics) ? body.topics : [];
+      const bundles = await Promise.all(
+        normalizedTopics.map(async (topic) => {
+          const normalizedTopic = String(topic || "").trim();
+          if (!normalizedTopic) return [normalizedTopic, null];
+          const signalBundle = await getStrategySignalBundle(normalizedTopic);
+          return [normalizedTopic, signalBundle];
+        })
+      );
+      const payload = selectTopicByFusion(normalizedTopics, Object.fromEntries(bundles));
+      await recordUsage("fusion.select_topic", {
+        actorRole: req.userRole,
+        tenantId: req.tenantId,
+        metadata: { overage: quota.usage.overage }
+      });
+      return sendJson(res, 200, payload);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPICS_REQUIRED") return badRequest(res, "topics required");
       if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
       if (error.message === "TENANT_NOT_FOUND")
         return sendJson(res, 404, { error: "tenant not found" });
@@ -1623,6 +1739,124 @@ export async function handleApi(req, res) {
     }
   }
 
+  if (method === "POST" && pathname === "/api/v1/seo/generate") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    try {
+      const quota = await enforceCommercialLimits(req, res, "seo.generate");
+      if (!quota) return;
+      const body = await readJsonBody(req);
+      const payload = generateSeoMetadata({
+        topic: body.topic,
+        script: body.script || "",
+        format: body.format || "shorts",
+        language: body.language || "tr"
+      });
+      await recordUsage("seo.generate", {
+        actorRole: req.userRole,
+        tenantId: req.tenantId,
+        metadata: { overage: quota.usage.overage }
+      });
+      return sendJson(res, 200, payload);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
+      if (error.message === "TENANT_NOT_FOUND")
+        return sendJson(res, 404, { error: "tenant not found" });
+      if (error.message === "TENANT_INACTIVE")
+        return sendJson(res, 403, { error: "tenant inactive" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/voice/generate") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    try {
+      const quota = await enforceCommercialLimits(req, res, "voice.generate");
+      if (!quota) return;
+      const body = await readJsonBody(req);
+      const payload = await generateVoiceover({
+        topic: body.topic,
+        script: body.script,
+        language: body.language || "tr",
+        voice: body.voice || "default"
+      });
+      await recordUsage("voice.generate", {
+        actorRole: req.userRole,
+        tenantId: req.tenantId,
+        metadata: { overage: quota.usage.overage }
+      });
+      return sendJson(res, 200, payload);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPIC_AND_SCRIPT_REQUIRED") {
+        return badRequest(res, "topic and script required");
+      }
+      if (error.message === "VOICE_PROVIDER_CONFIG_REQUIRED") {
+        return sendJson(res, 400, { error: "voice provider config required" });
+      }
+      if (isCircuitOpenError(error)) {
+        return sendJson(res, 503, { error: "voice provider temporarily unavailable" });
+      }
+      if (error.message === "VOICE_PROVIDER_TIMEOUT") {
+        return sendJson(res, 504, { error: "voice provider timeout" });
+      }
+      if (error.message === "VOICE_PROVIDER_NETWORK") {
+        return sendJson(res, 502, { error: "voice provider network error" });
+      }
+      if (String(error.message || "").startsWith("VOICE_PROVIDER_HTTP_")) {
+        return sendJson(res, 502, { error: "voice provider error" });
+      }
+      if (error.message === "TENANT_NOT_FOUND")
+        return sendJson(res, 404, { error: "tenant not found" });
+      if (error.message === "TENANT_INACTIVE")
+        return sendJson(res, 403, { error: "tenant inactive" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/v1/video/generate") {
+    if (!authorize(req, res, ["admin", "editor"])) return;
+    try {
+      const quota = await enforceCommercialLimits(req, res, "video.generate");
+      if (!quota) return;
+      const body = await readJsonBody(req);
+      const payload = await generateVisualAsset({
+        topic: body.topic,
+        prompt: body.prompt || "",
+        format: body.format || "shorts"
+      });
+      await recordUsage("video.generate", {
+        actorRole: req.userRole,
+        tenantId: req.tenantId,
+        metadata: { overage: quota.usage.overage }
+      });
+      return sendJson(res, 200, payload);
+    } catch (error) {
+      if (error.message === "INVALID_JSON") return badRequest(res, "invalid json");
+      if (error.message === "TOPIC_REQUIRED") return badRequest(res, "topic required");
+      if (error.message === "VISUAL_PROVIDER_CONFIG_REQUIRED") {
+        return sendJson(res, 400, { error: "visual provider config required" });
+      }
+      if (isCircuitOpenError(error)) {
+        return sendJson(res, 503, { error: "visual provider temporarily unavailable" });
+      }
+      if (error.message === "VISUAL_PROVIDER_TIMEOUT") {
+        return sendJson(res, 504, { error: "visual provider timeout" });
+      }
+      if (error.message === "VISUAL_PROVIDER_NETWORK") {
+        return sendJson(res, 502, { error: "visual provider network error" });
+      }
+      if (String(error.message || "").startsWith("VISUAL_PROVIDER_HTTP_")) {
+        return sendJson(res, 502, { error: "visual provider error" });
+      }
+      if (error.message === "TENANT_NOT_FOUND")
+        return sendJson(res, 404, { error: "tenant not found" });
+      if (error.message === "TENANT_INACTIVE")
+        return sendJson(res, 403, { error: "tenant inactive" });
+      return sendJson(res, 500, { error: "internal error" });
+    }
+  }
+
   if (method === "POST" && pathname === "/api/v1/channels") {
     if (!authorize(req, res, ["admin"])) return;
     try {
@@ -1866,7 +2100,10 @@ export async function handleApi(req, res) {
       const quota = await enforceCommercialLimits(req, res, "pipeline.run");
       if (!quota) return;
       const body = await readJsonBody(req);
-      const result = await runPipeline(body.topic, body.channelId || null, req.tenantId);
+      const topicInput = Array.isArray(body.topics) && body.topics.length > 0 ? body.topics : body.topic;
+      const result = await runPipeline(topicInput, body.channelId || null, req.tenantId, {
+        generateMedia: body.generateMedia
+      });
       await recordUsage("pipeline.run", {
         actorRole: req.userRole,
         tenantId: req.tenantId,

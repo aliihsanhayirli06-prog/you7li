@@ -7,6 +7,13 @@ const DEFAULT_STATE = {
   standbyColor: "green",
   canaryPercent: 0,
   rolloutStage: "stable",
+  releaseGate: {
+    type: "prompt_compliance",
+    minScore: 80,
+    lastScore: null,
+    status: "not_evaluated",
+    reason: null
+  },
   updatedAt: null
 };
 
@@ -45,20 +52,68 @@ function normalizePercent(value) {
   return Math.round(n);
 }
 
+function normalizeScore(value) {
+  if (value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error("INVALID_PROMPT_COMPLIANCE_SCORE");
+  return Number(n.toFixed(2));
+}
+
+function normalizeMinScore(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 80;
+  if (n < 0) return 0;
+  if (n > 100) return 100;
+  return Number(n.toFixed(2));
+}
+
 export async function getDeployStrategyState() {
   return readState();
 }
 
-export async function updateCanaryRollout(percent) {
+export async function updateCanaryRollout(percent, options = {}) {
   const current = await readState();
   const canaryPercent = normalizePercent(percent);
+  const minScore = normalizeMinScore(
+    options.minPromptComplianceScore ?? process.env.PROMPT_COMPLIANCE_MIN_SCORE
+  );
+  const promptComplianceScore = normalizeScore(options.promptComplianceScore);
+
+  if (canaryPercent >= 100 && promptComplianceScore == null) {
+    throw new Error("PROMPT_COMPLIANCE_SCORE_REQUIRED");
+  }
+  if (canaryPercent >= 100 && promptComplianceScore < minScore) {
+    const err = new Error("PROMPT_COMPLIANCE_GATE_BLOCKED");
+    err.meta = { minScore, promptComplianceScore };
+    throw err;
+  }
+
   const rolloutStage =
     canaryPercent === 0 ? "stable" : canaryPercent >= 100 ? "promoted" : "canary";
+
+  const releaseGate =
+    canaryPercent >= 100
+      ? {
+          type: "prompt_compliance",
+          minScore,
+          lastScore: promptComplianceScore,
+          status: "passed",
+          reason: null
+        }
+      : {
+          type: "prompt_compliance",
+          minScore,
+          lastScore: promptComplianceScore,
+          status: "not_required",
+          reason: canaryPercent === 0 ? "stable_stage" : "canary_stage"
+        };
+
   return writeState({
     ...current,
     strategy: "blue_green",
     canaryPercent,
     rolloutStage,
+    releaseGate,
     updatedAt: new Date().toISOString()
   });
 }

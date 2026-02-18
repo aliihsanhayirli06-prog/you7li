@@ -85,6 +85,9 @@ Optimizasyon davranisi:
 - `GET /api/v1/ops/dlq`: dead-letter queue kayitlari (admin)
 - `GET /api/v1/ops/autoscale`: queue tabanli worker autoscale plani (admin)
 - `GET /api/v1/ops/slo`: SLO/SLA durum ozeti (admin)
+- `GET /api/v1/ops/eval/dataset`: offline kalite eval dataset listesi (admin)
+- `POST /api/v1/ops/eval/regression/run`: otomatik kalite regression raporu uretir (admin)
+- `POST /api/v1/ops/alerts/provider/check`: provider telemetry esiklerini kontrol eder, ihlalde incident acabilir (admin)
 - `GET /api/v1/ops/capacity-plan`: kapasite ve autoscale birlikte (admin)
 - `GET /api/v1/ops/db/profile`: query profile snapshot (admin)
 - `GET /api/v1/ops/cache`: cache stats
@@ -220,6 +223,7 @@ YouTube publish:
 
 - SQL migration dosyalari: `db/migrations`
 - Calistirma komutu: `npm run migrate`
+- API version/deprecation migration playbook: `docs/api/migration-playbook.md`
 
 ## Reliability
 

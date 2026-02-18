@@ -9,7 +9,12 @@ export const PRICING = {
   "optimize.run": { units: 1, amountUsd: 0.01 },
   "channel.create": { units: 0.2, amountUsd: 0.001 },
   "script.generate": { units: 0.3, amountUsd: 0.002 },
-  "opportunity.score": { units: 0.2, amountUsd: 0.001 }
+  "opportunity.score": { units: 0.2, amountUsd: 0.001 },
+  "strategy.score": { units: 0.25, amountUsd: 0.0015 },
+  "fusion.select_topic": { units: 0.3, amountUsd: 0.002 },
+  "seo.generate": { units: 0.35, amountUsd: 0.0025 },
+  "voice.generate": { units: 0.8, amountUsd: 0.005 },
+  "video.generate": { units: 1, amountUsd: 0.008 }
 };
 
 function normalizeNumber(value, fallback = 0) {

@@ -587,3 +587,57 @@ export async function updatePublishOptimization({
     return all[idx];
   }
 }
+
+export async function updatePublishSeoFields({ publishId, title, description }) {
+  if (!publishId) {
+    throw new Error("PUBLISH_ID_REQUIRED");
+  }
+
+  if (!shouldUsePostgres()) {
+    const all = await readAllFromFile();
+    const idx = all.findIndex((item) => item.publishId === publishId);
+    if (idx === -1) return null;
+
+    all[idx] = {
+      ...all[idx],
+      title: String(title || all[idx].title || "").trim() || all[idx].title,
+      description:
+        String(description || all[idx].description || "").trim() || all[idx].description
+    };
+
+    await writeAllToFile(all);
+    return all[idx];
+  }
+
+  try {
+    const pool = await getPool();
+    const result = await pool.query(
+      `
+      UPDATE publishes
+      SET title = COALESCE(NULLIF(TRIM($2), ''), title),
+          description = COALESCE(NULLIF(TRIM($3), ''), description),
+          updated_at = NOW()
+      WHERE publish_id = $1
+      RETURNING *
+      `,
+      [publishId, title || null, description || null]
+    );
+
+    if (result.rowCount === 0) return null;
+    return mapRow(result.rows[0]);
+  } catch {
+    const all = await readAllFromFile();
+    const idx = all.findIndex((item) => item.publishId === publishId);
+    if (idx === -1) return null;
+
+    all[idx] = {
+      ...all[idx],
+      title: String(title || all[idx].title || "").trim() || all[idx].title,
+      description:
+        String(description || all[idx].description || "").trim() || all[idx].description
+    };
+
+    await writeAllToFile(all);
+    return all[idx];
+  }
+}

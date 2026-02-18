@@ -23,6 +23,7 @@ Detayli urun notlari:
 - `services/worker`: Render, queue, cron gibi arka plan isleri
 - `tests`: Entegrasyon ve e2e testleri
 - `docs`: Teknik kararlar ve yol haritasi
+- `docs/api/migration-playbook.md`: API version/deprecation migration adimlari
 
 ## Hızlı Baslangic
 
@@ -56,6 +57,9 @@ Detayli urun notlari:
 - `GET /api/v1/ops/dlq`
 - `GET /api/v1/ops/autoscale`
 - `GET /api/v1/ops/slo`
+- `GET /api/v1/ops/eval/dataset`
+- `POST /api/v1/ops/eval/regression/run`
+- `POST /api/v1/ops/alerts/provider/check`
 - `GET /api/v1/ops/capacity-plan`
 - `GET /api/v1/ops/db/profile`
 - `GET /api/v1/ops/cache`

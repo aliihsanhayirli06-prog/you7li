@@ -171,6 +171,52 @@ function validateRender(errors) {
   );
 }
 
+function validateGenerationProviders(errors) {
+  const voiceProvider = String(process.env.VOICE_PROVIDER || "mock").toLowerCase();
+  if (voiceProvider !== "mock" && voiceProvider !== "live") {
+    errors.push("VOICE_PROVIDER must be one of: mock, live");
+  } else if (voiceProvider === "live") {
+    assertEnv(
+      errors,
+      Boolean(process.env.VOICE_API_URL) && Boolean(process.env.VOICE_API_KEY),
+      "VOICE_PROVIDER=live requires VOICE_API_URL and VOICE_API_KEY"
+    );
+  }
+  assertEnv(
+    errors,
+    isNumberLike(process.env.VOICE_PROVIDER_TIMEOUT_MS || process.env.PROVIDER_HTTP_TIMEOUT_MS || 7000),
+    "VOICE_PROVIDER_TIMEOUT_MS must be a valid number"
+  );
+  assertEnv(
+    errors,
+    isNumberLike(process.env.VOICE_PROVIDER_MAX_RETRIES || process.env.PROVIDER_MAX_RETRIES || 2),
+    "VOICE_PROVIDER_MAX_RETRIES must be a valid number"
+  );
+
+  const visualProvider = String(process.env.VISUAL_PROVIDER || "mock").toLowerCase();
+  if (visualProvider !== "mock" && visualProvider !== "live") {
+    errors.push("VISUAL_PROVIDER must be one of: mock, live");
+  } else if (visualProvider === "live") {
+    assertEnv(
+      errors,
+      Boolean(process.env.VISUAL_API_URL) && Boolean(process.env.VISUAL_API_KEY),
+      "VISUAL_PROVIDER=live requires VISUAL_API_URL and VISUAL_API_KEY"
+    );
+  }
+  assertEnv(
+    errors,
+    isNumberLike(
+      process.env.VISUAL_PROVIDER_TIMEOUT_MS || process.env.PROVIDER_HTTP_TIMEOUT_MS || 8000
+    ),
+    "VISUAL_PROVIDER_TIMEOUT_MS must be a valid number"
+  );
+  assertEnv(
+    errors,
+    isNumberLike(process.env.VISUAL_PROVIDER_MAX_RETRIES || process.env.PROVIDER_MAX_RETRIES || 2),
+    "VISUAL_PROVIDER_MAX_RETRIES must be a valid number"
+  );
+}
+
 export function validateConfig(target = "api") {
   const errors = [];
 
@@ -180,6 +226,7 @@ export function validateConfig(target = "api") {
   validateYouTube(errors);
   validateSso(errors);
   validateRender(errors);
+  validateGenerationProviders(errors);
 
   if (errors.length > 0) {
     log("error", "config_validation_failed", {

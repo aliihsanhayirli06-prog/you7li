@@ -12,6 +12,9 @@ function createId() {
 export async function createDraftPublish({
   topic,
   script,
+  title = null,
+  description = null,
+  media = null,
   channelId = null,
   tenantId = "t_default"
 }) {
@@ -23,19 +26,21 @@ export async function createDraftPublish({
   const compliance = evaluateCompliance({ topic, script });
   const isOpen = compliance.status === "pass";
 
-  const title = `${topic} | 30 saniyede uygulanabilir plan`;
-  const description = [
-    "Bu video AI destekli strateji sistemiyle hazirlandi.",
-    "Amac: telife uygun ve surekli buyuyen icerik akisi.",
-    "#youtube #shorts #icerikstratejisi"
-  ].join("\n");
+  const normalizedTitle = String(title || "").trim() || `${topic} | 30 saniyede uygulanabilir plan`;
+  const normalizedDescription =
+    String(description || "").trim() ||
+    [
+      "Bu video AI destekli strateji sistemiyle hazirlandi.",
+      "Amac: telife uygun ve surekli buyuyen icerik akisi.",
+      "#youtube #shorts #icerikstratejisi"
+    ].join("\n");
 
   const record = {
     publishId: createId(),
     channelId: resolvedChannelId,
     topic,
-    title,
-    description,
+    title: normalizedTitle,
+    description: normalizedDescription,
     status: isOpen ? "scheduled" : "blocked",
     renderStatus: isOpen ? "queued" : null,
     videoAssetUrl: null,
@@ -77,7 +82,11 @@ export async function createDraftPublish({
       tenantId,
       channelId: record.channelId,
       topic: record.topic,
-      scheduledAt: record.scheduledAt
+      scheduledAt: record.scheduledAt,
+      audioAssetPath: media?.voice?.audioAssetPath || null,
+      audioAssetUrl: media?.voice?.audioAssetUrl || null,
+      visualAssetPath: media?.visual?.visualAssetPath || null,
+      visualAssetUrl: media?.visual?.visualAssetUrl || null
     });
     await logHistory("job.enqueued", {
       tenantId,

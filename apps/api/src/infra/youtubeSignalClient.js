@@ -71,3 +71,26 @@ export async function getYouTubeSignals(topic) {
     };
   }
 }
+
+export async function getYouTubeSearchSnippets(topic, maxResults = 8) {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) {
+    return [];
+  }
+
+  const q = encodeURIComponent(topic);
+  const safeMax = Math.min(Math.max(Number(maxResults) || 8, 1), 20);
+  const searchUrl = `${API_BASE}/search?part=snippet&type=video&maxResults=${safeMax}&order=viewCount&q=${q}&key=${apiKey}`;
+
+  try {
+    const search = await fetchJson(searchUrl);
+    const items = Array.isArray(search.items) ? search.items : [];
+    return items.map((item) => ({
+      videoId: item.id?.videoId || null,
+      title: String(item.snippet?.title || ""),
+      description: String(item.snippet?.description || "")
+    }));
+  } catch {
+    return [];
+  }
+}

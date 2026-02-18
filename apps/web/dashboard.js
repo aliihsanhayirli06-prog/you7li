@@ -144,12 +144,13 @@ function renderPublishes(items) {
 
   count.textContent = String(items.length);
 
+  const rows = buildPublishDashboardModel(items);
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="7">Kayit yok</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8">Kayit yok</td></tr>';
     return;
   }
 
-  tbody.innerHTML = items
+  tbody.innerHTML = rows
     .map(
       (item) => `<tr>
       <td>${item.publishId}</td>
@@ -159,6 +160,184 @@ function renderPublishes(items) {
       <td>${item.renderStatus || "-"}</td>
       <td>${item.optimizationStatus || "-"}</td>
       <td>${item.status}</td>
+      <td>${item.seoSelectionLabel}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+export function buildPublishDashboardModel(items) {
+  const list = Array.isArray(items) ? items : [];
+  return list.map((item) => {
+    const selected = item?.optimizationVariants?.selectedSeoVariant || null;
+    const variantId = String(selected?.variantId || "").trim();
+    const finalScore =
+      item?.optimizationVariants?.seoSelection?.ranking?.find((entry) => entry?.variantId === variantId)
+        ?.finalScore ?? selected?.variantScore;
+
+    const seoSelectionLabel = variantId
+      ? `${variantId}${Number.isFinite(Number(finalScore)) ? ` (${Number(finalScore).toFixed(3)})` : ""}`
+      : "-";
+
+    return {
+      publishId: item.publishId || "-",
+      topic: item.topic || "-",
+      complianceStatus: item.complianceStatus || "-",
+      metricsCtr: item.metricsCtr,
+      renderStatus: item.renderStatus || "-",
+      optimizationStatus: item.optimizationStatus || "-",
+      status: item.status || "-",
+      seoSelectionLabel
+    };
+  });
+}
+
+export function buildVideoDashboardModel(items) {
+  const list = Array.isArray(items) ? items : [];
+  return list.map((item) => ({
+    publishId: item.publishId || "-",
+    topic: item.topic || "-",
+    renderStatus: item.renderStatus || "-",
+    status: item.status || "-",
+    videoAssetPath: item.videoAssetPath || item.videoAssetUrl || "-"
+  }));
+}
+
+function renderVideos(items) {
+  const tbody = document.getElementById("videos-body");
+  if (!tbody) return;
+
+  const rows = buildVideoDashboardModel(items);
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5">Kayit yok</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows
+    .map(
+      (item) => `<tr>
+      <td>${item.publishId}</td>
+      <td>${item.topic}</td>
+      <td>${item.renderStatus}</td>
+      <td>${item.status}</td>
+      <td class="mono">${item.videoAssetPath}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+export function buildChannelDashboardModel(items) {
+  const list = Array.isArray(items) ? items : [];
+  return list.map((item) => ({
+    channelId: item.channelId || "-",
+    name: item.name || "-",
+    youtubeChannelId: item.youtubeChannelId || "-",
+    defaultLanguage: item.defaultLanguage || "-"
+  }));
+}
+
+function renderChannels(items) {
+  const tbody = document.getElementById("channels-body");
+  if (!tbody) return;
+
+  const rows = buildChannelDashboardModel(items);
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="4">Kayit yok</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows
+    .map(
+      (item) => `<tr>
+      <td>${item.channelId}</td>
+      <td>${item.name}</td>
+      <td>${item.youtubeChannelId}</td>
+      <td>${item.defaultLanguage}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+export function buildFusionDashboardModel(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) {
+    return {
+      summary: "veri yok",
+      rows: []
+    };
+  }
+
+  const avg = list.reduce((sum, item) => sum + Number(item?.fusion?.finalScore || 0), 0) / list.length;
+  return {
+    summary: `avg=${avg.toFixed(3)} / n=${list.length}`,
+    rows: list.map((item) => ({
+      topic: item.topic || "-",
+      finalScore: Number(item?.fusion?.finalScore || 0),
+      revenue: Number(item?.scores?.revenue || 0),
+      searchIntent: Number(item?.scores?.searchIntent || 0),
+      viralPattern: Number(item?.scores?.viralPattern || 0)
+    }))
+  };
+}
+
+export function buildProviderOpsModel(metrics) {
+  const providers = metrics?.providers || {};
+  return {
+    failures: Number(metrics?.counters?.providerFailuresTotal || 0),
+    retries: Number(metrics?.counters?.providerRetriesTotal || 0),
+    timeouts: Number(metrics?.counters?.providerTimeoutsTotal || 0),
+    providers
+  };
+}
+
+async function renderFusionPanel(publishes) {
+  const summaryEl = document.getElementById("fusion-summary");
+  const bodyEl = document.getElementById("fusion-body");
+  if (!summaryEl || !bodyEl) return;
+
+  const topics = Array.isArray(publishes)
+    ? publishes
+        .map((item) => String(item?.topic || "").trim())
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
+
+  if (!topics.length) {
+    summaryEl.textContent = "veri yok";
+    bodyEl.innerHTML = '<tr><td colspan="5">Kayit yok</td></tr>';
+    return;
+  }
+
+  const scored = await Promise.all(
+    topics.map(async (topic) => {
+      try {
+        return await fetchJson("/api/v1/strategy/score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic })
+        });
+      } catch {
+        return null;
+      }
+    })
+  );
+  const valid = scored.filter(Boolean);
+  const view = buildFusionDashboardModel(valid);
+  summaryEl.textContent = view.summary;
+
+  if (!view.rows.length) {
+    bodyEl.innerHTML = '<tr><td colspan="5">Kayit yok</td></tr>';
+    return;
+  }
+
+  bodyEl.innerHTML = view.rows
+    .map(
+      (row) => `<tr>
+      <td>${row.topic}</td>
+      <td>${row.finalScore.toFixed(3)}</td>
+      <td>${row.revenue.toFixed(3)}</td>
+      <td>${row.searchIntent.toFixed(3)}</td>
+      <td>${row.viralPattern.toFixed(3)}</td>
     </tr>`
     )
     .join("");
@@ -203,22 +382,29 @@ function renderOnboardingPanel(payload) {
 
 async function renderDashboardView() {
   try {
-    const [health, history, publishes, onboarding] = await Promise.all([
+    const [health, history, publishes, onboarding, channels] = await Promise.all([
       fetchJson("/health"),
       fetchJson("/api/v1/history?limit=20"),
       fetchJson("/api/v1/publish"),
-      fetchJson("/api/v1/onboarding/status")
+      fetchJson("/api/v1/onboarding/status"),
+      fetchJson("/api/v1/channels")
     ]);
 
     document.getElementById("health").textContent =
       `${health.storage}/${health.queue} q=${health.queueSize}`;
     renderHistory(history.items || []);
     renderPublishes(publishes.items || []);
+    renderVideos(publishes.items || []);
+    renderChannels(channels.items || []);
+    await renderFusionPanel(publishes.items || []);
     renderOnboardingPanel(onboarding);
   } catch (error) {
     showError("health", error.message);
     renderHistory([]);
     renderPublishes([]);
+    renderVideos([]);
+    renderChannels([]);
+    showError("fusion-summary", error.message);
     renderOnboardingPanel({
       onboardingStatus: "in_progress",
       emptyState: { showGuidedSetup: true },
@@ -234,15 +420,28 @@ async function renderOpsView() {
       fetchJson("/api/v1/ops/slo"),
       fetchJson("/api/v1/ops/autoscale")
     ]);
+    const provider = buildProviderOpsModel(metrics);
 
     document.getElementById("ops-http-p95").textContent = `${metrics.timings.httpDurationP95Ms} ms`;
     document.getElementById("ops-queue-size").textContent = String(autoscale.queueSize);
     document.getElementById("ops-autoscale").textContent = String(autoscale.desiredWorkers);
+    document.getElementById("ops-provider-failures").textContent = String(provider.failures);
+    document.getElementById("ops-provider-retries").textContent = String(provider.retries);
+    document.getElementById("ops-provider-timeouts").textContent = String(provider.timeouts);
+    document.getElementById("ops-provider-telemetry").textContent = JSON.stringify(
+      provider.providers,
+      null,
+      2
+    );
     document.getElementById("ops-slo").textContent = JSON.stringify(slo, null, 2);
   } catch (error) {
     showError("ops-http-p95", error.message);
     showError("ops-queue-size", error.message);
     showError("ops-autoscale", error.message);
+    showError("ops-provider-failures", error.message);
+    showError("ops-provider-retries", error.message);
+    showError("ops-provider-timeouts", error.message);
+    showError("ops-provider-telemetry", error.message);
     showError("ops-slo", error.message);
   }
 }
